@@ -1617,6 +1617,9 @@ private:
   std::string debugLogFile;
   bool waitForExit = false;
 
+  // draw the live process tree under the header. Off by default: only the summary line is drawn.
+  bool showTree = false;
+
   // the lower-cased --api name, for messages, and the DLL whose presence in a child marks it as
   // using that API. An empty apiMarkerDll means "any" - no filtering at all.
   std::string apiName = "any";
@@ -1660,6 +1663,9 @@ public:
     parser.add("no-gui", 0,
                "Don't open the GUI. By default the interface is launched connected to each "
                "injected child process.");
+    parser.add("tree", 0,
+               "Draw the live process tree of the watched process's descendants below the header, "
+               "refreshing in place. Off by default, which shows only the one-line summary.");
     parser.add<std::string>("debuglog", 0,
                             "Write DHR's debug log to this file. The injected processes share the "
                             "same log, so startup and injection problems are recorded there. "
@@ -1685,6 +1691,7 @@ public:
     debugLogFile = parser.get<std::string>("debuglog");
     workingDir = parser.get<std::string>("working-dir");
     waitForExit = parser.exist("wait-for-exit");
+    showTree = parser.exist("tree");
 
     apiName = parser.get<std::string>("api");
     std::transform(apiName.begin(), apiName.end(), apiName.begin(), ::tolower);
@@ -1922,10 +1929,16 @@ public:
       }
 
       // rebuild the tree every poll so we notice spawns promptly, but only redraw on a change or
-      // once a second - redrawing at the poll rate would just flicker
-      const size_t treeCount = BuildProcessTree(pid, treeRootName, procs, treeLines);
+      // once a second - redrawing at the poll rate would just flicker. Without --tree we skip the
+      // walk entirely and draw only the summary line.
+      size_t treeCount = 0;
+      bool changed = false;
 
-      const bool changed = (treeLines != lastTreeLines);
+      if(showTree)
+      {
+        treeCount = BuildProcessTree(pid, treeRootName, procs, treeLines);
+        changed = (treeLines != lastTreeLines);
+      }
 
       if((changed && now - lastDraw >= 100) || now - lastDraw >= 1000)
       {
@@ -1933,11 +1946,18 @@ public:
 
         // the summary is the last line of the block, so it redraws together with the tree as one
         // unit and never adds a line of its own
-        std::vector<std::string> block = treeLines;
+        std::vector<std::string> block = showTree ? treeLines : std::vector<std::string>();
 
-        block.push_back("[" + std::to_string((now - start) / 1000) + "s] PID " + std::to_string(pid) +
-                        " | " + std::to_string(treeCount) + " child processes | seen " +
-                        std::to_string(seenCount) + ", injected " + std::to_string(injectedCount));
+        std::string summary =
+            "[" + std::to_string((now - start) / 1000) + "s] PID " + std::to_string(pid);
+
+        if(showTree)
+          summary += " | " + std::to_string(treeCount) + " child processes";
+
+        summary +=
+            " | seen " + std::to_string(seenCount) + ", injected " + std::to_string(injectedCount);
+
+        block.push_back(summary);
 
         display.Draw(block);
 

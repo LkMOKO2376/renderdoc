@@ -79,6 +79,7 @@ dhrcmd watch [options] --pid <N>
 | `--api <name>` | `any` | 只注入真正用某 API 的子进程：`vulkan`/`d3d12`/`d3d11`/`d3d9`/`opengl`/`any` |
 | `--api-wait <ms>` | 10000 | 等 `--api` 对应 DLL 出现的上限，超时则该子进程被跳过 |
 | `--poll-ms <ms>` | 1 | 轮询间隔 |
+| `--tree` | 关 | 在表头下方实时绘制整棵后代进程树；默认只显示一行汇总 |
 | `--no-gui` | — | 不拉起界面 |
 | `--debuglog <file>` | 见下 | DHR 调试日志路径 |
 
@@ -87,7 +88,8 @@ dhrcmd watch [options] --pid <N>
 **行为要点**
 
 - 1ms 轮询（`PreciseSleep`：先 `Sleep` 再 QPC 自旋补尾，绕开 Windows 15ms 计时粒度）。
-- 控制台**实时显示整棵后代进程树**，按层缩进，原地重绘不滚屏；输出重定向时退化为逐次追加。
+- `--tree` 时控制台**实时显示整棵后代进程树**，按层缩进，原地重绘不滚屏；输出重定向时退化为逐次追加。
+  默认关闭，只画一行汇总（`[Ns] PID <pid> | seen X, injected Y`），且完全跳过每轮建树。
 - 检测到子进程时打印 32/64 位、mitigation 策略、非 System32 的 CRT 模块，再注入。
 - 调试日志默认写在 `dhrcmd.exe` 同目录，文件名 `dhrwatch_<时间戳>.log`（配合改动 3 不会丢）。
 - `--api` 是延迟注入：新子进程先进待定队列，每次轮询复查，DLL 出现即注入；超时打一行说明并跳过。
