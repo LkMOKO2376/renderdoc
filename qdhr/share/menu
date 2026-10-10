@@ -1,0 +1,6 @@
+?package(local.dhr):needs="x11" section="Applications/Programming" \
+	title="DHR" \
+	command="qdhr" \
+	icon="/usr/share/pixmaps/dhr-icon-32x32.xpm" \
+	icon16x16="/usr/share/pixmaps/dhr-icon-16x16.xpm" \
+	icon32x32="/usr/share/pixmaps/dhr-icon-32x32.xpm"

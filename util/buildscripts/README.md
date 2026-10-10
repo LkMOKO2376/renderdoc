@@ -1,6 +1,6 @@
 # Build scripts
 
-The build.sh in this folder is used for building packaged builds of renderdoc on both windows and linux.
+The build.sh in this folder is used for building packaged builds of dhr on both windows and linux.
 
 On windows the only supported environment is a MSYS2 bash shell, other shells may work but modifications to support them are unlikely to be accepted.
 
@@ -17,7 +17,7 @@ As above, running build.sh by default will compile all this.
 
 # Running
 
-Running build.sh apart from the optional arguments must pass `--snapshot <name>`. The name is used in packaging, i.e. the resulting zips will be `RenderDoc_name.zip`.
+Running build.sh apart from the optional arguments must pass `--snapshot <name>`. The name is used in packaging, i.e. the resulting zips will be `DHR_name.zip`.
 
 The output files will be placed in a `package` subfolder under the root.
 

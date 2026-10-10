@@ -1,0 +1,16 @@
+[Desktop Entry]
+Version=1.0
+Name=DHR
+Comment=A stand-alone graphics API debugger
+Comment[ru]=Автономный отладчик графических API
+GenericName=Graphics Debugger
+Exec=qdhr %f
+Icon=application-x-dhr-capture
+Terminal=false
+Type=Application
+X-MultipleArgs=false
+Categories=Development;
+Keywords=DHR;
+Keywords[ru]=РендерДок;
+StartupNotify=true
+MimeType=application/x-dhr-capture;

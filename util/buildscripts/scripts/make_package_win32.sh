@@ -75,7 +75,7 @@ find dist/Release{32,64}/ -iname '*.iobj' -exec rm '{}' \;
 # Copy in any android APKs that were built
 mkdir -p dist/Release64/plugins/android/
 if ls build-android-* > /dev/null; then
-	find build-android-* -iname 'org.renderdoc.renderdoccmd.*.apk' -exec cp '{}' dist/Release64/plugins/android ';'
+	find build-android-* -iname 'org.dhr.dhrcmd.*.apk' -exec cp '{}' dist/Release64/plugins/android ';'
 else
 	echo "WARNING: No android builds found, expected build-android-arm32 and build-android-arm64";
 
@@ -117,18 +117,18 @@ rm -f dist/Release{32,64}/*.{exp,lib,metagen,xml} dist/Release{32,64}/*.vshost.*
 # Delete all but xml files from PDB folder as well (large files, and not useful)
 rm -f dist/ReleasePDBs{32,64}/*.{exp,lib,metagen} dist/Release{32,64}/*.vshost.*
 
-# In the 64bit release folder, make an x86 subfolder and copy in renderdoc 32bit
+# In the 64bit release folder, make an x86 subfolder and copy in dhr 32bit
 mkdir -p dist/Release64/x86
-cp -R dist/Release32/{d3dcompiler_47.dll,renderdoc.dll,renderdoc.json,renderdocshim32.dll,renderdoccmd.exe,dbghelp.dll,symsrv.dll,symsrv.yes} dist/Release64/x86/
+cp -R dist/Release32/{d3dcompiler_47.dll,dhr.dll,dhr.json,dhrshim32.dll,dhrcmd.exe,dbghelp.dll,symsrv.dll,symsrv.yes} dist/Release64/x86/
 mkdir -p dist/ReleasePDBs64/x86
-cp -R dist/ReleasePDBs32/{d3dcompiler_47.dll,renderdoc.dll,renderdoc.json,renderdoc.pdb,renderdocshim32.dll,renderdocshim32.pdb,renderdoccmd.exe,renderdoccmd.pdb,dbghelp.dll,symsrv.dll,symsrv.yes} dist/ReleasePDBs64/x86/
+cp -R dist/ReleasePDBs32/{d3dcompiler_47.dll,dhr.dll,dhr.json,dhr.pdb,dhrshim32.dll,dhrshim32.pdb,dhrcmd.exe,dhrcmd.pdb,dbghelp.dll,symsrv.dll,symsrv.yes} dist/ReleasePDBs64/x86/
 
-VERSION=`grep -E "#define RENDERDOC_VERSION_(MAJOR|MINOR)" renderdoc/api/replay/version.h | tr -dc '[0-9\n]' | tr '\n' '.' | grep -Eo '[0-9]+\.[0-9]+'`
+VERSION=`grep -E "#define DHR_VERSION_(MAJOR|MINOR)" dhr/api/replay/version.h | tr -dc '[0-9\n]' | tr '\n' '.' | grep -Eo '[0-9]+\.[0-9]+'`
 
-export RENDERDOC_VERSION="${VERSION}"
+export DHR_VERSION="${VERSION}"
 
 # Ensure this variable passes through to windows on WSL
-export WSLENV=$WSLENV:RENDERDOC_VERSION
+export WSLENV=$WSLENV:DHR_VERSION
 
 "$WIX/bin/candle.exe" -o dist/Installer32.wixobj util/installer/Installer32.wxs
 "$WIX/bin/light.exe" -ext WixUIExtension -sw1076 -loc util/installer/customtext.wxl -o dist/Installer32.msi dist/Installer32.wixobj
@@ -157,11 +157,11 @@ popd # $REPO_ROOT
 # make zip manifests, excluding files we know are supposed to be zip-exclusive
 
 pushd "${REPO_ROOT}"/dist/Release32
-find . -type f -exec md5sum {} \; | grep -v './LICENSE.md' | grep -v './renderdocui.exe' > "${REPO_ROOT}"/dist/manifest_zip32.txt
+find . -type f -exec md5sum {} \; | grep -v './LICENSE.md' | grep -v './dhrui.exe' > "${REPO_ROOT}"/dist/manifest_zip32.txt
 popd
 
 pushd "${REPO_ROOT}"/dist/Release64
-find . -type f -exec md5sum {} \; | grep -v './LICENSE.md' | grep -v './renderdocui.exe' > "${REPO_ROOT}"/dist/manifest_zip64.txt
+find . -type f -exec md5sum {} \; | grep -v './LICENSE.md' | grep -v './dhrui.exe' > "${REPO_ROOT}"/dist/manifest_zip64.txt
 popd
 
 # extract the msi files
@@ -175,11 +175,11 @@ msiexec.exe -a $(native_path "${REPO_ROOT}"/dist/Installer64.msi) -qn TARGETDIR=
 
 # make msi manifests as above
 
-pushd "${REPO_ROOT}"/dist/msi32/PFiles/RenderDoc
+pushd "${REPO_ROOT}"/dist/msi32/PFiles/DHR
 find . -type f -exec md5sum {} \; | grep -v './LICENSE.rtf' > "${REPO_ROOT}"/dist/manifest_msi32.txt
 popd
 
-pushd "${REPO_ROOT}"/dist/msi64/PFiles/RenderDoc
+pushd "${REPO_ROOT}"/dist/msi64/PFiles/DHR
 find . -type f -exec md5sum {} \; | grep -v './LICENSE.rtf' > "${REPO_ROOT}"/dist/manifest_msi64.txt
 popd
 

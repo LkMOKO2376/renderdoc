@@ -1,7 +1,7 @@
 from __future__ import annotations
 from typing import Callable
 
-import renderdoc as rd
+import dhr as rd
 import rdtest
 
 

@@ -1,6 +1,6 @@
 from typing import Callable, Tuple
 
-import renderdoc as rd
+import dhr as rd
 import rdtest
 
 

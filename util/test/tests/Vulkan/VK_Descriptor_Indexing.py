@@ -2,7 +2,7 @@ from typing import Any, Dict, Tuple
 
 import rdtest
 import struct
-import renderdoc as rd
+import dhr as rd
 
 
 class VK_Descriptor_Indexing(rdtest.TestCase):

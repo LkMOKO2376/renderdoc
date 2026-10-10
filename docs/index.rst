@@ -1,4 +1,4 @@
-RenderDoc
+DHR
 =========
 
 .. include:: include/intro_header_inc.rst

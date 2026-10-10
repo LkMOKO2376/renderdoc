@@ -26,7 +26,7 @@ def log(s: str):
         print(s)
 
 
-# RenderDoc/swig specific filtering
+# DHR/swig specific filtering
 def shouldskip(name) -> bool:
     if name.startswith("Swig") or name.startswith("SWIG"):
         return True

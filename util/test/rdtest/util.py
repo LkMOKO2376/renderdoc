@@ -14,8 +14,8 @@ from rdtest.remoteserver import RemoteServer, AndroidRemoteServer
 
 
 # Android app IDs for the demos
-ADRD_DEMO_APP32 = 'renderdoc.org.demos.arm32'
-ADRD_DEMO_APP64 = 'renderdoc.org.demos.arm64'
+ADRD_DEMO_APP32 = 'dhr.org.demos.arm32'
+ADRD_DEMO_APP64 = 'dhr.org.demos.arm64'
 
 
 # Thanks to https://stackoverflow.com/a/3431838 for this file definition
@@ -92,16 +92,16 @@ def set_demos_binary(path: str):
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    import qrenderdoc
+    import qdhr
 
-def set_capture_context(ctx: qrenderdoc.CaptureContext):
+def set_capture_context(ctx: qdhr.CaptureContext):
     global _capture_context
     _capture_context = ctx
 
 
-_capture_context: qrenderdoc.CaptureContext | None = None
+_capture_context: qdhr.CaptureContext | None = None
 
-def get_capture_context() -> qrenderdoc.CaptureContext | None:
+def get_capture_context() -> qdhr.CaptureContext | None:
     return _capture_context
 
 

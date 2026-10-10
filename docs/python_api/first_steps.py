@@ -1,27 +1,27 @@
-if not pyrenderdoc.IsCaptureLoaded():
-    filename = pyrenderdoc.Extensions().OpenFileName("Choose a capture", "", "*.rdc")
+if not pydhr.IsCaptureLoaded():
+    filename = pydhr.Extensions().OpenFileName("Choose a capture", "", "*.rdc")
 
-    pyrenderdoc.LoadCapture(filename, renderdoc.ReplayOptions(), filename, False, True)
+    pydhr.LoadCapture(filename, dhr.ReplayOptions(), filename, False, True)
 
-eid = pyrenderdoc.CurEvent()
+eid = pydhr.CurEvent()
 
-name = pyrenderdoc.GetEventBrowser().GetEventName(eid)
+name = pydhr.GetEventBrowser().GetEventName(eid)
 
 print(f"Currently we are at EID {eid} named: '{name}'")
 if eid > 1:
-    prevname = pyrenderdoc.GetEventBrowser().GetEventName(eid - 1)
+    prevname = pydhr.GetEventBrowser().GetEventName(eid - 1)
     print(f"    > the previous event {eid-1} is named: '{prevname}'")
 
-pipe = pyrenderdoc.CurPipelineState()
+pipe = pydhr.CurPipelineState()
 
 outputs = pipe.GetOutputTargets()
 
 for idx, out in enumerate(outputs):
-    if out.resource != renderdoc.ResourceId.Null():
-        name = pyrenderdoc.GetResourceName(out.resource)
+    if out.resource != dhr.ResourceId.Null():
+        name = pydhr.GetResourceName(out.resource)
         print(f"Output {idx} is: {name}")
 
 depth = pipe.GetDepthTarget()
 
-name = pyrenderdoc.GetResourceName(depth.resource)
+name = pydhr.GetResourceName(depth.resource)
 print(f"Depth is: {name}")

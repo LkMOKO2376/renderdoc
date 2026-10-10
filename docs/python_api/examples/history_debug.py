@@ -1,18 +1,18 @@
 # these imports are not strictly necessary, but are convenient
-import renderdoc
-import qrenderdoc
+import dhr
+import qdhr
 
 # this is here to give autocomplete when editing the example
 # in VS Code where it doesn't know about this global
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    pyrenderdoc = qrenderdoc.CaptureContext()
+    pydhr = qdhr.CaptureContext()
 
-if not pyrenderdoc.IsCaptureLoaded():
-    filename = pyrenderdoc.Extensions().OpenFileName("Choose a capture", "", "*.rdc")
+if not pydhr.IsCaptureLoaded():
+    filename = pydhr.Extensions().OpenFileName("Choose a capture", "", "*.rdc")
 
-    pyrenderdoc.LoadCapture(filename, renderdoc.ReplayOptions(), filename, False, True)
+    pydhr.LoadCapture(filename, dhr.ReplayOptions(), filename, False, True)
 
 from typing import List
 
@@ -20,53 +20,53 @@ from typing import List
 # a callback to repeatedly ask the user if they're ready, with a 5 second
 # arbitrary wait each time they say no to give them a bit of time
 def check_ready():
-    choice = pyrenderdoc.Extensions().QuestionDialog(
+    choice = pydhr.Extensions().QuestionDialog(
         "Are you at an interesting event with pixel selected?",
         [
-            qrenderdoc.DialogButton.Yes,
-            qrenderdoc.DialogButton.No,
-            qrenderdoc.DialogButton.Cancel,
+            qdhr.DialogButton.Yes,
+            qdhr.DialogButton.No,
+            qdhr.DialogButton.Cancel,
         ],
         "Ready?",
     )
 
-    if choice == qrenderdoc.DialogButton.Cancel:
+    if choice == qdhr.DialogButton.Cancel:
         return
 
-    if choice == qrenderdoc.DialogButton.No:
-        pyrenderdoc.DelayedCallback(5000, check_ready)
+    if choice == qdhr.DialogButton.No:
+        pydhr.DelayedCallback(5000, check_ready)
         return
 
     prepare_history()
 
 
 def prepare_history():
-    tex_view = pyrenderdoc.GetTextureViewer()
+    tex_view = pydhr.GetTextureViewer()
 
     # find the selected texture and location
     id = tex_view.GetCurrentResource()
     sub = tex_view.GetSelectedSubresource()
     x, y = tex_view.GetPickedLocation()
 
-    name = pyrenderdoc.GetResourceName(id)
+    name = pydhr.GetResourceName(id)
 
-    print(f'Analysing on "{name}"@{renderdoc.DumpObject(sub)} at {x},{y}')
+    print(f'Analysing on "{name}"@{dhr.DumpObject(sub)} at {x},{y}')
 
-    disp = renderdoc.TextureDisplay()
+    disp = dhr.TextureDisplay()
     disp.subresource = sub
 
     # show the window first, as the results will likely take some time to come back
-    history_window = pyrenderdoc.ViewPixelHistory(id, x, y, sub.slice, disp)
-    pyrenderdoc.AddDockWindow(
+    history_window = pydhr.ViewPixelHistory(id, x, y, sub.slice, disp)
+    pydhr.AddDockWindow(
         history_window.Widget(),
-        qrenderdoc.DockReference.RightOf,
-        pyrenderdoc.GetPythonShell().Widget(),
+        qdhr.DockReference.RightOf,
+        pydhr.GetPythonShell().Widget(),
     )
 
     # get a blocking controller. This means long-running work like pixel history and
     # shader debugging will block the running thread. In a UI extension this is not
     # good but for python scripts it will block the script thread.
-    controller = pyrenderdoc.GetBlockingController()
+    controller = pydhr.GetBlockingController()
 
     history = controller.PixelHistory(id, x, y, sub, disp.typeCast)
 
@@ -85,12 +85,12 @@ def prepare_history():
             print(f"  at EID {h.eventId} modification failed")
 
     # get a list of all drawcalls that passed with a pixel shader bound
-    eb = pyrenderdoc.GetEventBrowser()
+    eb = pydhr.GetEventBrowser()
 
     passed_draws = list(
         filter(
             lambda x: eb.GetActionForEID(x.eventId).flags
-            & renderdoc.ActionFlags.Drawcall,
+            & dhr.ActionFlags.Drawcall,
             [h for h in history if h.Passed() and not h.unboundPS],
         )
     )
@@ -100,22 +100,22 @@ def prepare_history():
     else:
         p = passed_draws[0]
 
-        pyrenderdoc.SetEventID([], p.eventId, p.eventId, False)
+        pydhr.SetEventID([], p.eventId, p.eventId, False)
 
-        pipe = pyrenderdoc.CurPipelineState()
+        pipe = pydhr.CurPipelineState()
 
-        refl = pipe.GetShaderReflection(renderdoc.ShaderStage.Pixel)
+        refl = pipe.GetShaderReflection(dhr.ShaderStage.Pixel)
 
         if refl is None or not refl.debugInfo.debuggable:
             print("Shader can't be debugged:")
             print(refl.debugInfo.debugStatus)
             return
 
-        inputs = renderdoc.DebugPixelInputs()
+        inputs = dhr.DebugPixelInputs()
 
         inputs.primitive = p.primitiveID
-        inputs.sample = renderdoc.ReplayController.NoPreference
-        inputs.view = renderdoc.ReplayController.NoPreference
+        inputs.sample = dhr.ReplayController.NoPreference
+        inputs.view = dhr.ReplayController.NoPreference
 
         trace = controller.DebugPixel(x, y, inputs)
 
@@ -128,7 +128,7 @@ def prepare_history():
         # such as the information of which resources are bound or reflected
         # information per-instruction
 
-        states: List[renderdoc.ShaderDebugState] = []
+        states: List[dhr.ShaderDebugState] = []
 
         # continually simulate the shader until it completes
         while True:
@@ -193,16 +193,16 @@ def prepare_history():
         # if we want to display the shader debugger, we need to pass a new debugger
         # as the UI wants to process the set of states itself
         trace = controller.DebugPixel(x, y, inputs)
-        shad = pyrenderdoc.DebugShader(
+        shad = pydhr.DebugShader(
             refl,
             pipe.GetGraphicsPipelineObject(),
             trace,
             "Debugged From Python",
         )
 
-        pyrenderdoc.AddDockWindow(
+        pydhr.AddDockWindow(
             shad.Widget(),
-            qrenderdoc.DockReference.BottomOf,
+            qdhr.DockReference.BottomOf,
             history_window.Widget(),
         )
 

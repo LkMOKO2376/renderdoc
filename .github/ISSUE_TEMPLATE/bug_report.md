@@ -1,6 +1,6 @@
 ---
 name: Bug report
-about: Report a bug or problem encountered while using RenderDoc
+about: Report a bug or problem encountered while using DHR
 ---
 <!--
 ⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️ 
@@ -34,7 +34,7 @@ I'm happy to help, but you have to ensure I fully understand what you want and h
 
 <!-- if you are running a nightly build, list the date or commit hash for the version -->
 
-* RenderDoc version: XXX
+* DHR version: XXX
 * Operating System: XXX
 * Graphics API: XXX
 

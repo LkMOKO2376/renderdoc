@@ -41,40 +41,40 @@ You might get output like this in the output window when you click :guilabel:`Ru
 Breaking it down
 ----------------
 
-When running scripts in RenderDoc's UI, there is a pre-filled global variable ``pyrenderdoc`` which is your entry point to the API access. This variable represents a :class:`~qrenderdoc.CaptureContext` that provides common data like the current event as well as handles to the available panels like the event browser.
+When running scripts in DHR's UI, there is a pre-filled global variable ``pydhr`` which is your entry point to the API access. This variable represents a :class:`~qdhr.CaptureContext` that provides common data like the current event as well as handles to the available panels like the event browser.
 
 First we can check that a capture is loaded, and if not prompt the user to give us one to open.
 
 .. highlight:: python
 .. code:: python
 
-    if not pyrenderdoc.IsCaptureLoaded():
-        filename = pyrenderdoc.Extensions().OpenFileName("Choose a capture", "", "*.rdc")
+    if not pydhr.IsCaptureLoaded():
+        filename = pydhr.Extensions().OpenFileName("Choose a capture", "", "*.rdc")
 
-        pyrenderdoc.LoadCapture(filename, renderdoc.ReplayOptions(), filename, False, True)
+        pydhr.LoadCapture(filename, dhr.ReplayOptions(), filename, False, True)
 
-From ``pyrenderdoc`` we can query the :ref:`current event ID <currentevent>` as an integer. With that :ref:`event ID <eventids>` we can fetch the :class:`~qrenderdoc.EventBrowser` from :meth:`~qrenderdoc.CaptureContext.GetEventBrowser` and use it to look up the formatted name of both the current and previous event with :meth:`~qrenderdoc.EventBrowser.GetEventName`.
+From ``pydhr`` we can query the :ref:`current event ID <currentevent>` as an integer. With that :ref:`event ID <eventids>` we can fetch the :class:`~qdhr.EventBrowser` from :meth:`~qdhr.CaptureContext.GetEventBrowser` and use it to look up the formatted name of both the current and previous event with :meth:`~qdhr.EventBrowser.GetEventName`.
 
 .. highlight:: python
 .. code:: python
 
-    eid = pyrenderdoc.CurEvent()
+    eid = pydhr.CurEvent()
 
-    name = pyrenderdoc.GetEventBrowser().GetEventName(eid)
+    name = pydhr.GetEventBrowser().GetEventName(eid)
 
     print(f"Currently we are at EID {eid} named: '{name}'")
     if eid > 1:
-        prevname = pyrenderdoc.GetEventBrowser().GetEventName(eid-1)
+        prevname = pydhr.GetEventBrowser().GetEventName(eid-1)
         print(f"    > the previous event {eid-1} is named: '{prevname}'")
 
-After that we fetch the current :class:`~renderdoc.PipeState` from :meth:`~qrenderdoc.CaptureContext.CurPipelineState` which is an abstraction over a subset of the current pipeline state, which will work regardless of the API in the capture. This doesn't provide all possible states especially where there are differences between APIs but is convenient for simple uses.
+After that we fetch the current :class:`~dhr.PipeState` from :meth:`~qdhr.CaptureContext.CurPipelineState` which is an abstraction over a subset of the current pipeline state, which will work regardless of the API in the capture. This doesn't provide all possible states especially where there are differences between APIs but is convenient for simple uses.
 
-From the pipeline state we get the list of color output targets with :meth:`~renderdoc.PipeState.GetOutputTargets`.
+From the pipeline state we get the list of color output targets with :meth:`~dhr.PipeState.GetOutputTargets`.
 
 .. highlight:: python
 .. code:: python
 
-    pipe = pyrenderdoc.CurPipelineState()
+    pipe = pydhr.CurPipelineState()
 
     outputs = pipe.GetOutputTargets()
 
@@ -84,8 +84,8 @@ The list of outputs may contain unbound resources as some APIs have a fixed set 
 .. code:: python
 
     for idx, out in enumerate(outputs):
-        if out.resource != renderdoc.ResourceId.Null():
-            name = pyrenderdoc.GetResourceName(out.resource)
+        if out.resource != dhr.ResourceId.Null():
+            name = pydhr.GetResourceName(out.resource)
             print(f"Output {idx} is: {name}")
 
 The ``print()`` statements get sent to the output panel, which will show itself if currently hidden when you run the script. If you hit any python exceptions they will also print to this output panel.
@@ -97,14 +97,14 @@ We can also separately show the depth target, if bound, using the same mechanism
 
     depth = pipe.GetDepthTarget()
 
-    name = pyrenderdoc.GetResourceName(depth.resource)
+    name = pydhr.GetResourceName(depth.resource)
     print(f"Depth is: {name}")
 
 .. note::
 
-    It is safe to call ``sys.exit()`` to abort a script running, this will not close RenderDoc itself!
+    It is safe to call ``sys.exit()`` to abort a script running, this will not close DHR itself!
 
-This tutorial will not exhaustively cover everything available in the :class:`pyrenderdoc <qrenderdoc.CaptureContext>` context. You are encouraged to browse the documentation or explore through autocomplete to see what is available.
+This tutorial will not exhaustively cover everything available in the :class:`pydhr <qdhr.CaptureContext>` context. You are encouraged to browse the documentation or explore through autocomplete to see what is available.
 
 Next steps
 ----------

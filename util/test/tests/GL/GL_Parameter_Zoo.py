@@ -1,6 +1,6 @@
 import struct
 from typing import Tuple
-import renderdoc as rd
+import dhr as rd
 import rdtest
 
 

@@ -1,0 +1,4 @@
+[Thumbnailer Entry]
+TryExec=/usr/bin/dhrcmd
+Exec=/usr/bin/dhrcmd thumb -f png -s %s -o %o %i
+MimeType=application/x-dhr-capture;

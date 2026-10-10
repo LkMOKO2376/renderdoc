@@ -1,6 +1,6 @@
 from typing import Dict, List
 
-import renderdoc as rd
+import dhr as rd
 import rdtest
 import rdtest.util
 

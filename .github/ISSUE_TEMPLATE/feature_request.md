@@ -1,6 +1,6 @@
 ---
 name: Feature request
-about: Suggest an improvement or new feature be added to RenderDoc
+about: Suggest an improvement or new feature be added to DHR
 ---
 <!--
 ⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️ 
@@ -15,7 +15,7 @@ I'm happy to help, but you have to ensure I fully understand what you want and h
 
 ## Description of Feature
 
-<!-- Here you should not just describe what feature you want. Please describe the context of what you are trying to do or what workflow you would like, and why you can't do that with RenderDoc today. -->
+<!-- Here you should not just describe what feature you want. Please describe the context of what you are trying to do or what workflow you would like, and why you can't do that with DHR today. -->
 
 <!-- You can then separately describe a specific feature or solution you'd like to see to address that desire. -->
 
@@ -23,7 +23,7 @@ I'm happy to help, but you have to ensure I fully understand what you want and h
 
 <!-- if you are running a nightly build, list the date or commit hash for the version -->
 
-* RenderDoc version: XXX
+* DHR version: XXX
 * Operating System: XXX
 * Graphics API: XXX
 

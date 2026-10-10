@@ -1,5 +1,5 @@
 from __future__ import annotations
-import renderdoc as rd
+import dhr as rd
 import rdtest
 import math
 from typing import Any, Callable, Dict, List

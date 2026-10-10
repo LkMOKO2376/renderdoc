@@ -93,7 +93,7 @@ for ARCH in Win32 x64; do
 	done
 
 	if [ -d "${TMPSTORE}" ]; then
-		MSYS2_ARG_CONV_EXCL="*" "${BUILD_ROOT}"/support/symstore.exe add /s "$(native_path "${SYMSTORE}")" /compress /r /f "$(native_path "${TMPSTORE}")" /t RenderDoc /v $GITTAG
+		MSYS2_ARG_CONV_EXCL="*" "${BUILD_ROOT}"/support/symstore.exe add /s "$(native_path "${SYMSTORE}")" /compress /r /f "$(native_path "${TMPSTORE}")" /t DHR /v $GITTAG
 	fi
 
 done

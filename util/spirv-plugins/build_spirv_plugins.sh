@@ -28,21 +28,21 @@ if uname -a | grep -qiE 'win|msys|cygwin|microsoft'; then
 else
 	# Linux build
 
-	if docker image ls | grep -q renderdoc-build; then
+	if docker image ls | grep -q dhr-build; then
 		echo "Building for linux";
 
-		echo "Building renderdoc-spirv-build docker image";
+		echo "Building dhr-spirv-build docker image";
 
 		pushd docker
-		docker build -t renderdoc-spirv-build . || exit 1
+		docker build -t dhr-spirv-build . || exit 1
 		popd
 
 		echo "Docker image built. Running build"
 
-		docker run --rm -v $(pwd):/script:ro -v $(pwd)/spirv-plugins-linux64:/out renderdoc-spirv-build bash /script/_build.sh linux64 /out
+		docker run --rm -v $(pwd):/script:ro -v $(pwd)/spirv-plugins-linux64:/out dhr-spirv-build bash /script/_build.sh linux64 /out
 
 	else
-		echo "Run normal RenderDoc build first to generate renderdoc-build image";
+		echo "Run normal DHR build first to generate dhr-build image";
 		exit 1;
 	fi
 fi
