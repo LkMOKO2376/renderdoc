@@ -275,6 +275,19 @@ void InjectDLL(HANDLE hProcess, rdcwstr libName)
       if(hThread)
       {
         WaitForSingleObject(hThread, INFINITE);
+
+        // CreateRemoteThread succeeding only means the thread ran, not that the load worked. The
+        // thread's exit code is LoadLibraryW's return value - NULL means the target refused or
+        // failed to load the DLL, which is otherwise indistinguishable from success here.
+        // Note this is truncated to 32 bits; a non-zero low half means an HMODULE came back.
+        DWORD exitCode = 0;
+        if(GetExitCodeThread(hThread, &exitCode) && exitCode == 0)
+          RDCERR("LoadLibraryW('%ls') in remote process %u returned NULL - the load failed",
+                 dllPath, GetProcessId(hProcess));
+        else
+          RDCLOG("LoadLibraryW('%ls') in remote process %u returned %p", dllPath,
+                 GetProcessId(hProcess), (void *)(uintptr_t)exitCode);
+
         CloseHandle(hThread);
       }
       else

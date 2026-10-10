@@ -314,7 +314,9 @@ void rdclog_enableoutput()
 void rdclog_closelog()
 {
   log_output_enabled = false;
-  FileIO::logfile_close(logfileHandle, *logfile);
+  // pass an empty filename: passing the name would make FileIO::logfile_close() delete the log on
+  // shutdown, which throws away the only record of what happened in a run that failed
+  FileIO::logfile_close(logfileHandle, rdcstr());
 }
 
 void rdclog_flush()

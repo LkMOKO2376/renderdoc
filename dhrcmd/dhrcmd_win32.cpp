@@ -37,6 +37,10 @@
 #include <shlobj.h>
 #include <tlhelp32.h>
 
+#include <algorithm>
+#include <cwctype>
+#include <set>
+
 static std::string conv(const std::wstring &str)
 {
   std::string ret;
@@ -691,7 +695,7 @@ public:
       std::string reportPath = conv(dumpFolder) + "\\" + dumpId + ".zip";
 
       DHR_CreateBugReport(rdcstr(conv(wlogpath).c_str()), rdcstr(conv(wdump).c_str()),
-                                rdcstr(reportPath.c_str()));
+                          rdcstr(reportPath.c_str()));
 
       for(size_t i = 0; i < reportPath.size(); i++)
         if(reportPath[i] == '\\')
@@ -892,6 +896,1169 @@ public:
   }
 };
 
+static BOOL WINAPI WatchCtrlHandler(DWORD type)
+{
+  if(type == CTRL_C_EVENT || type == CTRL_BREAK_EVENT || type == CTRL_CLOSE_EVENT)
+  {
+    killSignal = true;
+    return TRUE;
+  }
+
+  return FALSE;
+}
+
+namespace
+{
+struct WatchProcEntry
+{
+  uint32_t pid = 0;
+  uint32_t ppid = 0;
+  std::wstring name;
+};
+
+// maps an --api name (already lower-cased) to the DLL whose presence in a child marks it as using
+// that graphics API. "any" returns an empty string, meaning no filter, and an unrecognised name
+// returns NULL so the caller can reject it.
+const wchar_t *ApiMarkerDll(const std::string &api)
+{
+  if(api == "vulkan")
+    return L"vulkan-1.dll";
+  if(api == "d3d12")
+    return L"d3d12.dll";
+  if(api == "d3d11")
+    return L"d3d11.dll";
+  if(api == "d3d9")
+    return L"d3d9.dll";
+  if(api == "opengl")
+    return L"opengl32.dll";
+  if(api == "any")
+    return L"";
+
+  return NULL;
+}
+
+// case-insensitive substring test, matching the semantics dhrshim uses for its path match
+bool ContainsInsensitive(const std::wstring &haystack, const std::wstring &needle)
+{
+  if(needle.empty())
+    return true;
+
+  std::wstring h = haystack;
+  std::wstring n = needle;
+
+  std::transform(h.begin(), h.end(), h.begin(), towlower);
+  std::transform(n.begin(), n.end(), n.begin(), towlower);
+
+  return h.find(n) != std::wstring::npos;
+}
+
+// true if the given process is 32-bit running under a 64-bit OS
+bool IsTarget32Bit(uint32_t pid)
+{
+  HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+
+  if(h == NULL)
+    return false;
+
+  BOOL wow64 = FALSE;
+  BOOL ok = IsWow64Process(h, &wow64);
+
+  CloseHandle(h);
+
+  return ok && wow64;
+}
+
+// prints any process mitigation policies that are enabled on the target. This is the native
+// equivalent of `Get-ProcessMitigation -Id <pid>`, checked at injection time because a binary
+// signature or image load policy is enough on its own to make the loader refuse to map our
+// unsigned dhr.dll into the process.
+void ReportMitigations(uint32_t pid)
+{
+  // PROCESS_QUERY_INFORMATION is the minimum needed, and is unrelated to what injection needs
+  HANDLE h = OpenProcess(PROCESS_QUERY_INFORMATION, FALSE, pid);
+
+  if(h == NULL)
+  {
+    std::cerr << "  Mitigations: couldn't query (OpenProcess error " << GetLastError() << ")"
+              << std::endl;
+    return;
+  }
+
+  bool any = false;
+
+  PROCESS_MITIGATION_BINARY_SIGNATURE_POLICY signature = {};
+
+  if(GetProcessMitigationPolicy(h, ProcessSignaturePolicy, &signature, sizeof(signature)) &&
+     (signature.MicrosoftSignedOnly || signature.StoreSignedOnly))
+  {
+    any = true;
+    std::cerr << "  Mitigation [BINARY SIGNATURE]: "
+              << (signature.MicrosoftSignedOnly ? "MicrosoftSignedOnly" : "StoreSignedOnly")
+              << "  <- blocks loading unsigned DLLs" << std::endl;
+  }
+
+  PROCESS_MITIGATION_IMAGE_LOAD_POLICY imageload = {};
+
+  if(GetProcessMitigationPolicy(h, ProcessImageLoadPolicy, &imageload, sizeof(imageload)))
+  {
+    std::string flags;
+
+    if(imageload.NoRemoteImages)
+      flags += "NoRemoteImages ";
+    if(imageload.NoLowMandatoryLabelImages)
+      flags += "NoLowMandatoryLabelImages ";
+    if(imageload.PreferSystem32Images)
+      flags += "PreferSystem32Images ";
+    if(imageload.AuditNoRemoteImages)
+      flags += "AuditNoRemoteImages ";
+    if(imageload.AuditNoLowMandatoryLabelImages)
+      flags += "AuditNoLowMandatoryLabelImages ";
+
+    if(!flags.empty())
+    {
+      any = true;
+      std::cerr << "  Mitigation [IMAGE LOAD]: " << flags << std::endl;
+    }
+  }
+
+  PROCESS_MITIGATION_DYNAMIC_CODE_POLICY dynamiccode = {};
+
+  if(GetProcessMitigationPolicy(h, ProcessDynamicCodePolicy, &dynamiccode, sizeof(dynamiccode)) &&
+     dynamiccode.ProhibitDynamicCode)
+  {
+    any = true;
+    std::cerr << "  Mitigation [DYNAMIC CODE]: ProhibitDynamicCode" << std::endl;
+  }
+
+  PROCESS_MITIGATION_EXTENSION_POINT_DISABLE_POLICY extpoints = {};
+
+  if(GetProcessMitigationPolicy(h, ProcessExtensionPointDisablePolicy, &extpoints, sizeof(extpoints)) &&
+     extpoints.DisableExtensionPoints)
+  {
+    any = true;
+    std::cerr << "  Mitigation [EXTENSION POINTS]: DisableExtensionPoints" << std::endl;
+  }
+
+  PROCESS_MITIGATION_STRICT_HANDLE_CHECK_POLICY handles = {};
+
+  if(GetProcessMitigationPolicy(h, ProcessStrictHandleCheckPolicy, &handles, sizeof(handles)) &&
+     handles.RaiseExceptionOnInvalidHandleReference)
+  {
+    any = true;
+    std::cerr << "  Mitigation [STRICT HANDLES]: RaiseExceptionOnInvalidHandleReference" << std::endl;
+  }
+
+  PROCESS_MITIGATION_SYSTEM_CALL_DISABLE_POLICY syscalls = {};
+
+  if(GetProcessMitigationPolicy(h, ProcessSystemCallDisablePolicy, &syscalls, sizeof(syscalls)) &&
+     syscalls.DisallowWin32kSystemCalls)
+  {
+    any = true;
+    std::cerr << "  Mitigation [SYSTEM CALLS]: DisallowWin32kSystemCalls" << std::endl;
+  }
+
+  if(!any)
+    std::cout << "  Mitigations: none of the queryable policies are enabled." << std::endl;
+
+  CloseHandle(h);
+}
+
+// reports the target's CRT/runtime modules that did NOT come from System32. dhr.dll imports
+// MSVCP140/VCRUNTIME140, and the loader binds those imports against whatever copy of that module
+// the process already has loaded. A target that ships its own older copies (very common for games)
+// makes the load fail with ERROR_PROC_NOT_FOUND even though nothing is blocking us.
+void ReportRuntimeModules(uint32_t pid)
+{
+  static const wchar_t *crtNames[] = {
+      L"msvcp140.dll",
+      L"msvcp140_1.dll",
+      L"msvcp140_2.dll",
+      L"msvcp140_codecvt_ids.dll",
+      L"vcruntime140.dll",
+      L"vcruntime140_1.dll",
+      L"vcruntime140_threads.dll",
+      L"ucrtbase.dll",
+      L"concrt140.dll",
+  };
+
+  int found = 0;
+  int foreign = 0;
+  bool ok = false;
+  DWORD lastErr = 0;
+
+  // the module list can change while we're walking it, which comes back as ERROR_BAD_LENGTH -
+  // retry the same way FindRemoteDLL does
+  for(int attempt = 0; attempt < 10 && !ok; attempt++)
+  {
+    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE, pid);
+
+    if(snap == INVALID_HANDLE_VALUE)
+    {
+      lastErr = GetLastError();
+
+      // ERROR_BAD_LENGTH: the list changed while we walked it. ERROR_PARTIAL_COPY: a module was
+      // being loaded or unloaded underneath us. Both are transient, so retry.
+      if(lastErr == ERROR_BAD_LENGTH || lastErr == ERROR_PARTIAL_COPY)
+      {
+        Sleep(5);
+        continue;
+      }
+
+      break;
+    }
+
+    found = 0;
+    foreign = 0;
+
+    MODULEENTRY32W me = {};
+    me.dwSize = sizeof(me);
+
+    if(!Module32FirstW(snap, &me))
+    {
+      lastErr = GetLastError();
+
+      CloseHandle(snap);
+
+      // ERROR_BAD_LENGTH: the list changed while we walked it. ERROR_PARTIAL_COPY: a module was
+      // being loaded or unloaded underneath us. Both are transient, so retry.
+      if(lastErr == ERROR_BAD_LENGTH || lastErr == ERROR_PARTIAL_COPY)
+      {
+        Sleep(5);
+        continue;
+      }
+
+      break;
+    }
+
+    ok = true;
+
+    do
+    {
+      std::wstring name = me.szModule;
+      std::transform(name.begin(), name.end(), name.begin(), towlower);
+
+      bool crt = false;
+
+      for(const wchar_t *n : crtNames)
+      {
+        if(name == n)
+        {
+          crt = true;
+          break;
+        }
+      }
+
+      if(!crt)
+        continue;
+
+      found++;
+
+      std::wstring lower = me.szExePath;
+      std::transform(lower.begin(), lower.end(), lower.begin(), towlower);
+
+      const bool system32 = lower.find(L"\\windows\\system32\\") != std::wstring::npos ||
+                            lower.find(L"\\windows\\syswow64\\") != std::wstring::npos;
+
+      // only the non-System32 ones can clash with our imports
+      if(system32)
+        continue;
+
+      foreign++;
+
+      std::cerr << "  Runtime module NOT from System32: " << conv(me.szModule) << "  <- "
+                << conv(me.szExePath) << std::endl;
+    } while(Module32NextW(snap, &me));
+
+    CloseHandle(snap);
+  }
+
+  if(!ok)
+  {
+    std::cerr << "  Runtime modules: couldn't enumerate the target's modules (error " << lastErr
+              << ")." << std::endl;
+    return;
+  }
+
+  if(found == 0)
+    std::cout << "  Runtime modules: no CRT modules loaded in the target." << std::endl;
+  else if(foreign == 0)
+    std::cout << "  Runtime modules: " << found << " CRT module(s), all from System32." << std::endl;
+  else
+    std::cerr << "  ^ dhr.dll imports the same CRT - a mismatched copy already loaded here will "
+                 "make the load fail with ERROR_PROC_NOT_FOUND."
+              << std::endl;
+}
+
+// true if the named module (matched case-insensitively against just the filename, e.g.
+// "vulkan-1.dll") is currently loaded in the given process. Uses the same module snapshot as
+// ReportRuntimeModules, with the same retries on the transient list-changed errors.
+bool IsModuleLoaded(uint32_t pid, const std::wstring &moduleName)
+{
+  std::wstring want = moduleName;
+  std::transform(want.begin(), want.end(), want.begin(), towlower);
+
+  for(int attempt = 0; attempt < 10; attempt++)
+  {
+    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE, pid);
+
+    if(snap == INVALID_HANDLE_VALUE)
+    {
+      DWORD err = GetLastError();
+
+      // ERROR_BAD_LENGTH: the list changed while we walked it. ERROR_PARTIAL_COPY: a module was
+      // being loaded or unloaded underneath us. Both are transient, so retry.
+      if(err == ERROR_BAD_LENGTH || err == ERROR_PARTIAL_COPY)
+      {
+        Sleep(5);
+        continue;
+      }
+
+      return false;
+    }
+
+    MODULEENTRY32W me = {};
+    me.dwSize = sizeof(me);
+
+    if(!Module32FirstW(snap, &me))
+    {
+      DWORD err = GetLastError();
+
+      CloseHandle(snap);
+
+      if(err == ERROR_BAD_LENGTH || err == ERROR_PARTIAL_COPY)
+      {
+        Sleep(5);
+        continue;
+      }
+
+      return false;
+    }
+
+    bool found = false;
+
+    do
+    {
+      std::wstring name = me.szModule;
+      std::transform(name.begin(), name.end(), name.begin(), towlower);
+
+      if(name == want)
+      {
+        found = true;
+        break;
+      }
+    } while(Module32NextW(snap, &me));
+
+    CloseHandle(snap);
+
+    return found;
+  }
+
+  return false;
+}
+
+// true if the file exists on disk
+bool FileExists(const std::string &path)
+{
+  return GetFileAttributesW(conv(path).c_str()) != INVALID_FILE_ATTRIBUTES;
+}
+
+// builds a default debug log path in the build output folder, i.e. next to dhrcmd.exe
+std::string DefaultWatchLogPath()
+{
+  std::vector<wchar_t> exepath(2048, 0);
+
+  if(GetModuleFileNameW(NULL, exepath.data(), (DWORD)exepath.size() - 1) == 0)
+    return std::string();
+
+  wchar_t *lastSlash = wcsrchr(exepath.data(), '\\');
+
+  if(lastSlash == NULL)
+    return std::string();
+
+  *lastSlash = 0;
+
+  SYSTEMTIME st;
+  GetLocalTime(&st);
+
+  wchar_t file[MAX_PATH] = {0};
+
+  _snwprintf_s(file, _countof(file), _TRUNCATE, L"%s\\dhrwatch_%04d.%02d.%02d_%02d.%02d.%02d.log",
+               exepath.data(), st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
+
+  return conv(std::wstring(file));
+}
+
+bool SnapshotProcesses(std::vector<WatchProcEntry> &out)
+{
+  out.clear();
+
+  HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+
+  if(snap == INVALID_HANDLE_VALUE)
+    return false;
+
+  PROCESSENTRY32W pe = {};
+  pe.dwSize = sizeof(pe);
+
+  if(Process32FirstW(snap, &pe))
+  {
+    do
+    {
+      WatchProcEntry e;
+      e.pid = pe.th32ProcessID;
+      e.ppid = pe.th32ParentProcessID;
+      e.name = pe.szExeFile;
+      out.push_back(e);
+    } while(Process32NextW(snap, &pe));
+  }
+
+  CloseHandle(snap);
+
+  return true;
+}
+
+// Windows' Sleep() rounds up to the ~15ms system tick unless the timer resolution is raised, so
+// for short intervals sleep the bulk of the time and spin out the tail. This is what makes a 1ms
+// poll interval actually mean ~1ms.
+void PreciseSleep(uint32_t ms)
+{
+  if(ms > 2)
+  {
+    Sleep(ms - 1);
+    ms = 1;
+  }
+
+  LARGE_INTEGER freq, start, now;
+  QueryPerformanceFrequency(&freq);
+  QueryPerformanceCounter(&start);
+
+  const double target = (double)ms / 1000.0;
+
+  do
+  {
+    QueryPerformanceCounter(&now);
+  } while((double)(now.QuadPart - start.QuadPart) / (double)freq.QuadPart < target);
+}
+
+// Draws the live process tree plus its summary line as one block that refreshes in place: the
+// cursor is moved back over the previous block before redrawing, so the console line count never
+// grows. When stdout isn't a console there is no cursor to move, so the block is just appended.
+struct WatchTreeDisplay
+{
+  size_t lines = 0;    // rows the last drawn block occupies
+  size_t width = 0;    // widest row seen, so shorter rows still blank out the old text
+
+  void Init() {}
+  void Shutdown() { Clear(); }
+
+  // wipes the block so a permanent message can be printed on clean lines
+  void Clear()
+  {
+    HANDLE h = GetStdHandle(STD_OUTPUT_HANDLE);
+    CONSOLE_SCREEN_BUFFER_INFO info;
+
+    if(lines && GetConsoleScreenBufferInfo(h, &info))
+    {
+      COORD p = info.dwCursorPosition;
+      p.Y = (SHORT)(p.Y - (SHORT)lines);
+      SetConsoleCursorPosition(h, p);
+
+      for(size_t i = 0; i < lines; i++)
+        std::cout << std::string(width, ' ') << '\n';
+
+      SetConsoleCursorPosition(h, p);
+    }
+
+    lines = 0;
+    std::cout << std::flush;
+  }
+
+  void Draw(const std::vector<std::string> &block)
+  {
+    HANDLE h = GetStdHandle(STD_OUTPUT_HANDLE);
+    CONSOLE_SCREEN_BUFFER_INFO info;
+    const bool console = GetConsoleScreenBufferInfo(h, &info) != 0;
+
+    if(console && lines)
+    {
+      COORD p = info.dwCursorPosition;
+      p.Y = (SHORT)(p.Y - (SHORT)lines);
+      SetConsoleCursorPosition(h, p);
+    }
+
+    for(const std::string &l : block)
+      width = width > l.size() ? width : l.size();
+
+    for(const std::string &l : block)
+    {
+      std::cout << l;
+
+      if(console)
+        std::cout << std::string(width - l.size(), ' ');
+
+      std::cout << '\n';
+    }
+
+    lines = block.size();
+    std::cout << std::flush;
+  }
+};
+// builds the indented process tree under rootPid from a process snapshot, e.g.
+//
+//   launcher.exe (1234)
+//      child.exe (5678)
+//
+// Siblings are listed in ascending pid order. Each pid is visited at most once and the depth is
+// capped, so a broken, recycled or looping parent chain can't make the walk run away, and a
+// process whose parent chain doesn't reach rootPid never appears. Returns the number of non-root
+// processes shown.
+size_t BuildProcessTree(uint32_t rootPid, const std::string &rootFallbackName,
+                        const std::vector<WatchProcEntry> &procs, std::vector<std::string> &out)
+{
+  const int maxDepth = 16;
+
+  out.clear();
+
+  // index every process by parent, sorted by pid within each parent
+  std::vector<const WatchProcEntry *> byParent;
+  byParent.reserve(procs.size());
+
+  const WatchProcEntry *root = NULL;
+
+  for(const WatchProcEntry &e : procs)
+  {
+    if(e.pid == rootPid)
+      root = &e;
+
+    byParent.push_back(&e);
+  }
+
+  std::sort(byParent.begin(), byParent.end(), [](const WatchProcEntry *a, const WatchProcEntry *b) {
+    if(a->ppid != b->ppid)
+      return a->ppid < b->ppid;
+
+    return a->pid < b->pid;
+  });
+
+  std::string rootName = root ? conv(root->name) : rootFallbackName;
+
+  if(rootName.empty())
+    rootName = "pid " + std::to_string(rootPid);
+
+  out.push_back("  " + rootName + " (" + std::to_string(rootPid) + ")" + (root ? "" : " (exited)"));
+
+  // if the watched process is gone the tree is just its (exited) root - don't walk, children may
+  // have been reparented or left orphaned under a stale parent id
+  if(!root)
+    return 0;
+
+  struct Item
+  {
+    const WatchProcEntry *entry;
+    int depth;
+  };
+
+  std::vector<Item> stack;
+  std::set<uint32_t> visited;
+  visited.insert(rootPid);
+
+  auto pushChildren = [&](uint32_t parent, int childDepth) {
+    if(childDepth > maxDepth)
+      return;
+
+    // the direct children of this parent, in ascending pid order
+    auto first = std::lower_bound(byParent.begin(), byParent.end(), parent,
+                                  [](const WatchProcEntry *a, uint32_t p) { return a->ppid < p; });
+    auto last = std::upper_bound(first, byParent.end(), parent,
+                                 [](uint32_t p, const WatchProcEntry *a) { return p < a->ppid; });
+
+    // pushed in reverse so they pop in ascending pid order
+    for(auto it = last; it != first;)
+    {
+      --it;
+
+      if(visited.count((*it)->pid) == 0)
+        stack.push_back({*it, childDepth});
+    }
+  };
+
+  pushChildren(rootPid, 1);
+
+  size_t count = 0;
+
+  while(!stack.empty())
+  {
+    Item item = stack.back();
+    stack.pop_back();
+
+    // never render the same pid twice, so a cycle or a reused pid can't loop forever
+    if(!visited.insert(item.entry->pid).second)
+      continue;
+
+    out.push_back(std::string((size_t)(2 + 3 * item.depth), ' ') + conv(item.entry->name) + " (" +
+                  std::to_string(item.entry->pid) + ")");
+    count++;
+
+    pushChildren(item.entry->pid, item.depth + 1);
+  }
+
+  return count;
+}
+
+// strips any directory components from a path
+std::string Basename(const std::string &path)
+{
+  size_t pos = path.find_last_of("\\/");
+
+  return pos == std::string::npos ? path : path.substr(pos + 1);
+}
+
+// the env var DHR sets to turn on its Vulkan layer. This is DHR_VULKAN_LAYER_VAR from
+// dhr/common/globalconfig.h, and is exactly what DHR's own in-process child hooking
+// (dhr/os/win32/sys_win32_hooks.cpp) sets for the children it spawns. The literal is repeated here
+// because dhrcmd doesn't include DHR's internal headers.
+static const wchar_t *kVulkanLayerEnv = L"ENABLE_VULKAN_DHR_CAPTURE=1";
+static const wchar_t *kVulkanLayerEnvPrefix = L"ENABLE_VULKAN_DHR_CAPTURE=";
+
+// case-insensitive check that an environment entry begins with the given "NAME=" prefix
+bool EnvEntryHasPrefix(const wchar_t *entry, const wchar_t *prefix)
+{
+  while(*prefix)
+  {
+    if(*entry == 0 || towlower(*entry) != towlower(*prefix))
+      return false;
+
+    entry++;
+    prefix++;
+  }
+
+  return true;
+}
+
+// launches a program with the given arguments, returning its pid
+bool LaunchProcessWithArgs(uint32_t &pid, const std::string &exe,
+                           const std::vector<std::string> &args, const std::string &workingDir)
+{
+  std::wstring cmdline = L"\"";
+  cmdline += conv(exe);
+  cmdline += L"\"";
+
+  for(const std::string &a : args)
+  {
+    cmdline += L" ";
+    cmdline += conv(a);
+  }
+
+  // build a copy of our environment with the Vulkan layer enabled, so every descendant of the
+  // launched tree inherits it. This matches what DHR's own child hooking does; without it the
+  // layer never loads in the child and no Vulkan capture is possible. Win32 walks this as a
+  // double-NUL-terminated block of L"KEY=VALUE" strings.
+  std::vector<wchar_t> env;
+  {
+    LPWCH original = GetEnvironmentStringsW();
+
+    if(original)
+    {
+      for(LPWCH p = original; *p; p += wcslen(p) + 1)
+      {
+        // drop any existing copy of the variable so ours below wins
+        if(EnvEntryHasPrefix(p, kVulkanLayerEnvPrefix))
+          continue;
+
+        env.insert(env.end(), p, p + wcslen(p) + 1);
+      }
+
+      FreeEnvironmentStringsW(original);
+    }
+
+    env.insert(env.end(), kVulkanLayerEnv, kVulkanLayerEnv + wcslen(kVulkanLayerEnv) + 1);
+
+    // terminator for the whole block
+    env.push_back(0);
+  }
+
+  std::wstring wdir = conv(workingDir);
+
+  STARTUPINFOW si;
+  PROCESS_INFORMATION pi;
+  ZeroMemory(&si, sizeof(si));
+  ZeroMemory(&pi, sizeof(pi));
+  si.cb = sizeof(si);
+
+  // the environment block is Unicode, so CreateProcessW must be told so
+  if(!CreateProcessW(NULL, &cmdline[0], NULL, NULL, FALSE, CREATE_UNICODE_ENVIRONMENT, env.data(),
+                     wdir.empty() ? NULL : wdir.c_str(), &si, &pi))
+    return false;
+
+  pid = pi.dwProcessId;
+
+  CloseHandle(pi.hThread);
+  CloseHandle(pi.hProcess);
+
+  return true;
+}
+}    // namespace
+
+// Watches an existing process and injects DHR into any child process it starts. Unlike the
+// hookIntoChildren capture option this doesn't require DHR to be loaded into the process being
+// watched, but it does mean we can only see children once they already exist - there is an
+// inherent race if a child initialises its graphics API faster than we can poll for it.
+struct WatchCommand : public Command
+{
+private:
+  std::string executable;
+  std::vector<std::string> programArgs;
+  uint32_t targetPID = 0;
+  std::string workingDir;
+  std::string childFilter;
+  uint32_t pollMS = 1;
+  bool launchGUI = true;
+  std::string captureFile;
+  std::string debugLogFile;
+  bool waitForExit = false;
+
+  // the lower-cased --api name, for messages, and the DLL whose presence in a child marks it as
+  // using that API. An empty apiMarkerDll means "any" - no filtering at all.
+  std::string apiName = "any";
+  std::wstring apiMarkerDll;
+
+  // how long a child may take to load apiMarkerDll before we give up on it
+  uint32_t apiWaitMS = 10000;
+
+  // owns the live in-place process tree drawn below the header
+  WatchTreeDisplay display;
+
+public:
+  WatchCommand() : Command() {}
+
+  virtual void AddOptions(cmdline::parser &parser)
+  {
+    parser.set_footer("<executable> [program arguments]");
+    parser.stop_at_rest(true);
+
+    parser.add<uint32_t>("pid", 0,
+                         "Watch this already-running process instead of launching one. Give it "
+                         "either an executable to launch or a --pid, not both.",
+                         false, 0);
+    parser.add<std::string>("child", 0,
+                            "If given, only child processes whose executable name contains this "
+                            "substring (case-insensitive) are injected.",
+                            false);
+    parser.add<std::string>("api", 0,
+                            "Only inject children that use this graphics API, one of: vulkan, "
+                            "d3d12, d3d11, d3d9, opengl, any. A child is deferred until it loads "
+                            "the API's DLL, up to --api-wait. Default is any, which injects "
+                            "immediately as before.",
+                            false, "any");
+    parser.add<uint32_t>(
+        "api-wait", 0,
+        "How long to keep waiting for a child to load its API's DLL (see --api) before skipping "
+        "it, in milliseconds.",
+        false, 10000, cmdline::range(0, 60000));
+    parser.add<uint32_t>("poll-ms", 0, "How often to poll for new child processes, in milliseconds.",
+                         false, 1, cmdline::range(1, 60000));
+    parser.add("no-gui", 0,
+               "Don't open the GUI. By default the interface is launched connected to each "
+               "injected child process.");
+    parser.add<std::string>("debuglog", 0,
+                            "Write DHR's debug log to this file. The injected processes share the "
+                            "same log, so startup and injection problems are recorded there. "
+                            "Default is a timestamped file next to dhrcmd.exe.",
+                            false);
+  }
+
+  virtual const char *Description()
+  {
+    return "Watches a process and injects DHR into any child processes it starts.";
+  }
+
+  virtual bool IsInternalOnly() { return false; }
+  virtual bool IsCaptureCommand() { return true; }
+
+  virtual bool Parse(cmdline::parser &parser, GlobalEnvironment &)
+  {
+    targetPID = parser.get<uint32_t>("pid");
+    childFilter = parser.get<std::string>("child");
+    pollMS = parser.get<uint32_t>("poll-ms");
+    launchGUI = !parser.exist("no-gui");
+    captureFile = parser.get<std::string>("capture-file");
+    debugLogFile = parser.get<std::string>("debuglog");
+    workingDir = parser.get<std::string>("working-dir");
+    waitForExit = parser.exist("wait-for-exit");
+
+    apiName = parser.get<std::string>("api");
+    std::transform(apiName.begin(), apiName.end(), apiName.begin(), ::tolower);
+    apiWaitMS = parser.get<uint32_t>("api-wait");
+
+    const wchar_t *marker = ApiMarkerDll(apiName);
+
+    if(marker == NULL)
+    {
+      std::cerr << "Error: unknown --api '" << apiName
+                << "'. Valid values are: vulkan, d3d12, d3d11, d3d9, opengl, any." << std::endl
+                << std::endl
+                << parser.usage();
+      return false;
+    }
+
+    apiMarkerDll = marker;
+
+    std::vector<std::string> rest = parser.rest();
+    parser.set_rest({});
+
+    if(targetPID != 0 && !rest.empty())
+    {
+      std::cerr << "Error: give either an executable to launch or a --pid, not both." << std::endl
+                << std::endl
+                << parser.usage();
+      return false;
+    }
+
+    if(targetPID == 0 && rest.empty())
+    {
+      std::cerr << "Error: give an executable to launch, or --pid of a running process." << std::endl
+                << std::endl
+                << parser.usage();
+      return false;
+    }
+
+    if(!rest.empty())
+    {
+      executable = rest[0];
+      programArgs.assign(rest.begin() + 1, rest.end());
+    }
+
+    return true;
+  }
+
+  virtual int Execute(const CaptureOptions &opts)
+  {
+    SetConsoleCtrlHandler(&WatchCtrlHandler, TRUE);
+
+    // set up a debug log, so that if an injection or capture fails we have something to look at
+    // afterwards. Injected processes inherit this same log, so anything they report during their
+    // own startup lands here too.
+    const std::string logPath = debugLogFile.empty() ? DefaultWatchLogPath() : debugLogFile;
+
+    if(!logPath.empty())
+    {
+      DHR_SetDebugLogFile(rdcstr(logPath.c_str(), logPath.size()));
+
+      std::cout << "Debug log: " << logPath << std::endl;
+
+      if(!FileExists(logPath))
+        std::cerr << "Warning: DHR did not create the debug log at " << logPath << std::endl;
+    }
+
+    const std::wstring wchild = conv(childFilter);
+
+    const rdcstr captureTemplate(captureFile.c_str(), captureFile.size());
+
+    std::vector<WatchProcEntry> procs;
+
+    uint32_t pid = 0;
+    bool attachToExisting = false;
+
+    if(!executable.empty())
+    {
+      if(!LaunchProcessWithArgs(pid, executable, programArgs, workingDir))
+      {
+        std::cerr << "Failed to launch '" << executable << "' (error " << GetLastError() << ")."
+                  << std::endl;
+        return 1;
+      }
+    }
+    else
+    {
+      pid = targetPID;
+      attachToExisting = true;
+    }
+
+    const uint64_t start = GetTickCount64();
+
+    const std::string label =
+        !executable.empty() ? Basename(executable) : std::string("pid ") + std::to_string(pid);
+
+    // set up the in-place tree display
+    display.Init();
+
+    if(attachToExisting)
+      std::cout << "Watching PID " << pid << " (" << label << ")";
+    else
+      std::cout << "Launched '" << executable << "' (PID " << pid << ")";
+
+    std::cout << ", polling every " << pollMS << "ms for child processes";
+
+    if(!childFilter.empty())
+      std::cout << " matching '" << childFilter << "'";
+
+    if(apiName != "any")
+      std::cout << ", only injecting children that load the " << apiName << " API";
+
+    std::cout << ". Press Ctrl-C to stop." << std::endl;
+
+    std::cout << std::endl;
+
+    // a process that was already running when we attached had its environment fixed at creation
+    // time, so we can't retroactively enable the Vulkan layer for it - the layer has to be present
+    // when the Vulkan instance is created. Vulkan capture in its tree may therefore not work.
+    if(attachToExisting)
+      std::cerr << "Warning: --pid attaches to a process that started before watch, so the Vulkan "
+                   "layer cannot be enabled for it and Vulkan capture may not work."
+                << std::endl;
+
+    std::set<uint32_t> seen;
+    size_t seenCount = 0;
+    size_t injectedCount = 0;
+
+    // children that matched the filter but hadn't loaded their API's DLL yet. Each is re-checked
+    // every poll and injected as soon as the DLL appears, or dropped once its deadline passes.
+    struct PendingChild
+    {
+      uint32_t pid;
+      std::wstring name;
+      uint64_t deadline;
+    };
+    std::vector<PendingChild> pending;
+
+    // when we launched the parent ourselves, everything it spawns is a legitimate child so no
+    // baseline is needed. When attaching to a process that's already running, ignore whatever
+    // already exists before we started watching.
+    if(attachToExisting && SnapshotProcesses(procs))
+    {
+      for(const WatchProcEntry &e : procs)
+        seen.insert(e.pid);
+    }
+
+    seen.insert(pid);
+
+    uint64_t lastDraw = 0;
+
+    // the tree lines from the last redraw, so we know when the tree has actually changed. The
+    // name used for the root if the watched process itself is no longer in the snapshot
+    std::vector<std::string> treeLines;
+    std::vector<std::string> lastTreeLines;
+    const std::string treeRootName = Basename(executable);
+
+    while(!killSignal)
+    {
+      PreciseSleep(pollMS);
+
+      const uint64_t now = GetTickCount64();
+
+      if(SnapshotProcesses(procs))
+      {
+        for(const WatchProcEntry &e : procs)
+        {
+          if(e.pid == 0 || e.ppid != pid)
+            continue;
+
+          if(seen.count(e.pid))
+            continue;
+
+          // "seen" counts every distinct direct child we spot, whether or not it matches the
+          // filter or ends up injected. A child deferred waiting for its API is counted here once,
+          // when first seen, and kept in the pending list below.
+          seen.insert(e.pid);
+          seenCount++;
+
+          if(!ContainsInsensitive(e.name, wchild))
+            continue;
+
+          // don't inject into our own tools, that would only recurse or be pointless
+          if(ContainsInsensitive(e.name, L"dhrcmd.exe") || ContainsInsensitive(e.name, L"qdhr.exe"))
+            continue;
+
+          // a launcher's rendering child often initialises its graphics API a moment after it
+          // starts, so if the requested API's DLL isn't loaded yet wait for it rather than giving
+          // up. An empty apiMarkerDll means "any", so we never defer in that case.
+          if(!apiMarkerDll.empty() && !IsModuleLoaded(e.pid, apiMarkerDll))
+          {
+            display.Clear();
+            std::cout << std::endl;
+            std::cout << "Child process " << conv(e.name) << " (PID " << e.pid
+                      << ") has not loaded " << conv(apiMarkerDll) << " yet, waiting up to "
+                      << apiWaitMS << "ms for it." << std::endl;
+            std::cout << std::endl;
+
+            pending.push_back({e.pid, e.name, now + apiWaitMS});
+            continue;
+          }
+
+          if(InjectChildProcess(e.pid, e.name, logPath, captureTemplate, opts))
+            injectedCount++;
+        }
+      }
+
+      // re-check the children we deferred waiting for their API's DLL. Inject as soon as it shows
+      // up, or drop and report once the deadline passes.
+      for(size_t i = 0; i < pending.size();)
+      {
+        const PendingChild &p = pending[i];
+
+        if(IsModuleLoaded(p.pid, apiMarkerDll))
+        {
+          if(InjectChildProcess(p.pid, p.name, logPath, captureTemplate, opts))
+            injectedCount++;
+
+          pending.erase(pending.begin() + i);
+          continue;
+        }
+
+        if(now >= p.deadline)
+        {
+          display.Clear();
+          std::cout << std::endl;
+          std::cout << "Skipping child process " << conv(p.name) << " (PID " << p.pid
+                    << "): it never loaded " << conv(apiMarkerDll) << " within " << apiWaitMS
+                    << "ms of being seen." << std::endl;
+          std::cout << std::endl;
+
+          pending.erase(pending.begin() + i);
+          continue;
+        }
+
+        i++;
+      }
+
+      // rebuild the tree every poll so we notice spawns promptly, but only redraw on a change or
+      // once a second - redrawing at the poll rate would just flicker
+      const size_t treeCount = BuildProcessTree(pid, treeRootName, procs, treeLines);
+
+      const bool changed = (treeLines != lastTreeLines);
+
+      if((changed && now - lastDraw >= 100) || now - lastDraw >= 1000)
+      {
+        lastDraw = now;
+
+        // the summary is the last line of the block, so it redraws together with the tree as one
+        // unit and never adds a line of its own
+        std::vector<std::string> block = treeLines;
+
+        block.push_back("[" + std::to_string((now - start) / 1000) + "s] PID " + std::to_string(pid) +
+                        " | " + std::to_string(treeCount) + " child processes | seen " +
+                        std::to_string(seenCount) + ", injected " + std::to_string(injectedCount));
+
+        display.Draw(block);
+
+        lastTreeLines = treeLines;
+      }
+    }
+
+    // wipe the tree block so the farewell message lands on a clean line
+    display.Shutdown();
+
+    SetConsoleCtrlHandler(&WatchCtrlHandler, FALSE);
+
+    std::cout << "Stopped watching." << std::endl;
+
+    return 0;
+  }
+
+private:
+  // prints the diagnostics for a child we've decided to inject and runs the injection itself.
+  // returns true if the injection succeeded, so the caller knows whether to count it.
+  bool InjectChildProcess(uint32_t childPid, const std::wstring &childName,
+                          const std::string &logPath, const rdcstr &captureTemplate,
+                          const CaptureOptions &opts)
+  {
+    const bool child32 = IsTarget32Bit(childPid);
+
+    // wipe the live tree first so this message isn't interleaved with it
+    display.Clear();
+    std::cout << std::endl;
+    std::cout << "Detected child process " << conv(childName) << " (PID " << childPid
+              << (child32 ? ", 32-bit" : ", 64-bit") << "), injecting." << std::endl;
+    std::cout << std::endl;
+
+    ReportMitigations(childPid);
+    ReportRuntimeModules(childPid);
+    std::cout << std::endl;
+
+    if(child32)
+      std::cerr << "  Warning: 32-bit target. Injecting needs a matching 32-bit DHR build "
+                   "(x86\\dhr.dll next to dhrcmd.exe, or a Win32\\<Config>\\ tree)."
+                << std::endl;
+
+    ExecuteResult res = DHR_InjectIntoProcess(childPid, rdcarray<EnvironmentModification>(),
+                                              captureTemplate, opts, waitForExit);
+
+    if(res.result.code != ResultCode::Succeeded)
+    {
+      std::cerr << "  Injection failed (code " << (uint32_t)res.result.code
+                << "): " << res.result.Message().c_str() << std::endl;
+
+      if(!logPath.empty())
+      {
+        if(FileExists(logPath))
+          std::cerr << "  See the debug log for details: " << logPath << std::endl;
+        else
+          std::cerr << "  (no debug log was written - " << logPath << " doesn't exist)" << std::endl;
+      }
+
+      std::cout << std::endl;
+
+      return false;
+    }
+
+    std::cout << "  Injected successfully (target control ident " << res.ident << ")." << std::endl;
+
+    if(launchGUI)
+      LaunchGUI(res.ident);
+
+    std::cout << std::endl;
+
+    return true;
+  }
+
+  static void LaunchGUI(uint32_t ident)
+  {
+    // qdhr.exe sits alongside dhrcmd.exe in the output directory
+    std::vector<wchar_t> exepath(2048, 0);
+
+    if(GetModuleFileNameW(NULL, exepath.data(), (DWORD)exepath.size() - 1) == 0)
+    {
+      std::cerr << "  Couldn't locate qdhr.exe, not launching the GUI." << std::endl;
+      return;
+    }
+
+    wchar_t *lastSlash = wcsrchr(exepath.data(), '\\');
+
+    if(lastSlash == NULL)
+    {
+      std::cerr << "  Couldn't locate qdhr.exe, not launching the GUI." << std::endl;
+      return;
+    }
+
+    *lastSlash = 0;
+
+    std::wstring qdhrexe = exepath.data();
+    qdhrexe += L"/qdhr.exe";
+
+    wchar_t params[512] = {0};
+
+    _snwprintf_s(params, _countof(params), _TRUNCATE, L"\"%s\" --targetcontrol localhost:%u",
+                 qdhrexe.c_str(), ident);
+
+    STARTUPINFOW si;
+    PROCESS_INFORMATION pi;
+    ZeroMemory(&si, sizeof(si));
+    ZeroMemory(&pi, sizeof(pi));
+    si.cb = sizeof(si);
+
+    if(!CreateProcessW(NULL, params, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi))
+    {
+      std::cerr << "  Failed to launch the GUI." << std::endl;
+      return;
+    }
+
+    CloseHandle(pi.hThread);
+    CloseHandle(pi.hProcess);
+
+    std::cout << "  Launched the GUI connected to the target." << std::endl;
+  }
+};
+
 // ignore the argc/argv we get here, convert from wide to be sure we're unicode safe.
 int main(int, char *)
 {
@@ -946,6 +2113,10 @@ int main(int, char *)
   // processes and loads dhr.dll in the target one. In any other process it unloads as soon as
   // possible
   add_command("globalhook", new GlobalHookCommand());
+
+  // watches a running process and injects DHR into any child processes it spawns, without needing
+  // DHR to be loaded into the watched process itself
+  add_command("watch", new WatchCommand());
 
   return dhrcmd(env, argv);
 }

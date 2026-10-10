@@ -5,4 +5,14 @@
 	<IncludePath>$(SolutionDir)\util\sdkfix;$(IncludePath)</IncludePath>
 </PropertyGroup>
 
+<!-- Since VS2022 17.0 std::mutex's ctor is constexpr and zero-fills storage in place, skipping MSVCP140's
+     _Mtx_init_in_situ. When the host process ships an older app-local MSVCP140 (many games do) the in-place
+     layout is incompatible, so the injected dhr.dll fails to load with ERROR_DLL_INIT_FAILED. This macro
+     restores the runtime _Mtx_init_in_situ call, fixing the load without affecting the normal case. -->
+<ItemDefinitionGroup>
+	<ClCompile>
+		<PreprocessorDefinitions>_DISABLE_CONSTEXPR_MUTEX_CONSTRUCTOR;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+	</ClCompile>
+</ItemDefinitionGroup>
+
 </Project>
