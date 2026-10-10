@@ -10,6 +10,8 @@ Release64/
 build/
 build-*/
 /compile_commands.json
+/x64/
+/Win32/
 .cache/
 /dist/
 /package/
