@@ -4,7 +4,7 @@ Resource information service for RenderDoc.
 
 import base64
 
-import renderdoc as rd
+import dhr as rd
 
 from ..utils import Parsers
 

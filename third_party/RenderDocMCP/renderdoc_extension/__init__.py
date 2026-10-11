@@ -12,13 +12,13 @@ _context = None
 _server = None
 _version = ""
 
-# Try to import qrenderdoc for UI integration (only available in RenderDoc)
+# Try to import qdhr for UI integration (only available in RenderDoc)
 try:
-    import qrenderdoc as qrd
+    import qdhr as qrd
 
-    _has_qrenderdoc = True
+    _has_qdhr = True
 except ImportError:
-    _has_qrenderdoc = False
+    _has_qdhr = False
 
 
 def register(version, ctx):
@@ -44,7 +44,7 @@ def register(version, ctx):
     _server.start()
 
     # Register menu item if UI is available
-    if _has_qrenderdoc:
+    if _has_qdhr:
         try:
             ctx.Extensions().RegisterWindowMenu(
                 qrd.WindowMenu.Tools, ["MCP Bridge", "Status"], _show_status

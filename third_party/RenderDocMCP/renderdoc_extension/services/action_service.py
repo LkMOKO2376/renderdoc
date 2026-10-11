@@ -2,7 +2,7 @@
 Draw call / action operations service for RenderDoc.
 """
 
-import renderdoc as rd
+import dhr as rd
 
 from ..utils import Serializers, Helpers
 

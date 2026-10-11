@@ -2,7 +2,7 @@
 Parse utility functions for RenderDoc data types.
 """
 
-import renderdoc as rd
+import dhr as rd
 
 
 class Parsers:

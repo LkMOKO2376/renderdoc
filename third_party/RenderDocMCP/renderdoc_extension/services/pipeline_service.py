@@ -2,7 +2,7 @@
 Pipeline state service for RenderDoc.
 """
 
-import renderdoc as rd
+import dhr as rd
 
 from ..utils import Parsers, Serializers, Helpers
 

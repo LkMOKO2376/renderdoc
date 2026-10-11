@@ -3,8 +3,10 @@
 本目录是第三方项目 **RenderDocMCP** 的源码副本，直接以文件形式放进本仓库（**不是** git submodule），
 用于让 AI 客户端（Claude Code 等）通过 MCP 协议读取 RenderDoc 的抓帧数据，辅助图形调试。
 
-> 上游仓库的 `README.md` / `CLAUDE.md` 为日文原文，本副本未做任何修改，便于与上游对照。
+> 上游仓库的 `README.md` / `CLAUDE.md` 为日文原文，未做改动，便于与上游对照。
 > 本文件是本仓库自己补充的说明。
+> 注意：`renderdoc_extension/` 有一处必要的本地改动（宿主模块改名），见文末
+> 「本仓库对扩展的本地改动」。
 
 ## 来源
 
@@ -13,7 +15,7 @@
 | 上游仓库 | https://github.com/halby24/RenderDocMCP.git |
 | 固定 commit | `11b6b743a4c02c94eb8a1125a1e025dbd021352a`（2026-01-21） |
 | 许可证 | MIT（见 `LICENSE`） |
-| 副本方式 | `git archive` 导出上游被跟踪的全部文件，未改动内容 |
+| 副本方式 | `git archive` 导出上游被跟踪的全部文件；仅 `renderdoc_extension/` 有本地改动，见文末 |
 
 **升级方式**：重新从上游导出并整体覆盖本目录，然后在本文件里更新上面的 commit 值。
 
@@ -109,6 +111,33 @@ pyproject.toml       uv 工程定义，注册 `renderdoc-mcp` 命令
 | `get_buffer_contents` | 缓冲区内容（Base64） |
 | `get_texture_info` / `get_texture_data` | 纹理元数据 / 像素数据（Base64） |
 | `get_pipeline_state` | 管线状态 |
+
+## 本仓库对扩展的本地改动（与上游不一致）
+
+本副本的 `renderdoc_extension/` **不是**与上游逐字节一致的：因为本仓库把 RenderDoc 重命名成了
+DHR，宿主内嵌的 Python 模块名也跟着变了（`renderdoc` → `dhr`，`qrenderdoc` → `qdhr`，
+构建产物是 `x64\Release\pymodules\dhr.pyd` / `qdhr.pyd`）。扩展里引用这两个宿主模块的 import
+已相应改写，否则加载时会报 `No module named renderdoc`。
+
+具体只改了这些行（其余内容与上游保持逐字节一致）：
+
+| 文件 | 改动 |
+| --- | --- |
+| `services/action_service.py` | `import renderdoc as rd` → `import dhr as rd` |
+| `services/capture_manager.py` | 同上 |
+| `services/pipeline_service.py` | 同上 |
+| `services/resource_service.py` | 同上 |
+| `services/search_service.py` | 同上 |
+| `utils/helpers.py` | 同上 |
+| `utils/parsers.py` | 同上 |
+| `utils/serializers.py` | 同上 |
+| `__init__.py` | `import qrenderdoc as qrd` → `import qdhr as qrd`，并把局部标志 `_has_qrenderdoc` 改名为 `_has_qdhr`（定义处与 `if` 使用处） |
+
+扩展用到的 C++ API 名字（`ResourceId` / `ActionFlags` / `ShaderStage` / `GPUCounter` /
+`ReplayOptions` / `Subresource` / `qrd.WindowMenu` 等）都没有变，所以不需要改动。
+
+**这些是本副本仅有的本地改动。** 若日后按上文“升级方式”从上游重新导出覆盖本目录，
+必须把这些 import 改名重新应用一遍，否则扩展会在 qDHR 里加载失败。
 
 ## 注意
 

@@ -2,7 +2,7 @@
 Common helper functions for RenderDoc operations.
 """
 
-import renderdoc as rd
+import dhr as rd
 
 
 class Helpers:
