@@ -77,5 +77,5 @@ AI tooling (MCP)
 
 This repository vendors [RenderDocMCP](https://github.com/halby24/RenderDocMCP) under [`third_party/RenderDocMCP/`](third_party/RenderDocMCP/README.DHR.md), an MCP server that lets AI clients (such as Claude Code) read capture data out of a running RenderDoc / DHR instance. It is checked in as plain files rather than as a submodule.
 
-The client-side config lives in [`.mcp.json`](.mcp.json) at the repo root, but the server has to be installed first - see [third_party/RenderDocMCP/README.DHR.md](third_party/RenderDocMCP/README.DHR.md) for the setup steps. It is independent of the C++ build: nothing in `dhr.sln` depends on it.
+The client-side config lives in [`.mcp.json`](.mcp.json) at the repo root and runs the server straight out of the vendored copy with `uv`, so no global install is needed - only the RenderDoc-side extension has to be installed and enabled first. See [third_party/RenderDocMCP/README.DHR.md](third_party/RenderDocMCP/README.DHR.md) for the setup steps. It is independent of the C++ build: nothing in `dhr.sln` depends on it.
 

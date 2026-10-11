@@ -47,36 +47,47 @@ pyproject.toml       uv 工程定义，注册 `renderdoc-mcp` 命令
 
 2. **在 RenderDoc 里启用**：`Tools > Manage Extensions`，勾选 “RenderDoc MCP Bridge”。
 
-3. **安装 MCP 服务端**
+3. **（可选）全局安装 MCP 服务端**
+
+   本仓库的 `.mcp.json` 走的是下面的本地运行方式，**不需要**这一步。
+   只有想在任何目录下直接用 `renderdoc-mcp` 命令时才需要：
 
    ```bash
    uv tool install third_party/RenderDocMCP   # 加 --editable 可在改动源码后立即生效
    uv tool update-shell                       # 把命令目录加进 PATH
    ```
 
-   装好后 `renderdoc-mcp` 命令即可用（等价于 `pyproject.toml` 里的
-   `renderdoc-mcp = "mcp_server.server:main"`）。
-
-4. **在客户端配置**：仓库根目录已经放了 `.mcp.json`，内容为
-
-   ```json
-   { "mcpServers": { "renderdoc": { "command": "renderdoc-mcp" } } }
-   ```
-
-   重启 Claude Code 时会提示是否信任该项目的 MCP 服务，确认即可。
-   若不想全局安装，也可以把命令换成本地运行的形式：
+4. **在客户端配置**：仓库根目录的 `.mcp.json` 已经配好了，内容是免全局安装的本地形式 ——
+   `uv` 会按 `pyproject.toml` 在该目录下建一个 `.venv` 并装上依赖
+   （`fastmcp` / `pydantic` 等，首次启动需要联网，约需几十秒）：
 
    ```json
    { "mcpServers": { "renderdoc": { "command": "uv",
        "args": ["run", "--directory", "third_party/RenderDocMCP", "renderdoc-mcp"] } } }
    ```
 
+   重启 Claude Code 时会提示是否信任该项目的 MCP 服务，确认即可。
+   若已经全局装过，也可以简化成 `{ "command": "renderdoc-mcp" }`。
+
 5. **使用**：先让 RenderDoc/DHR 打开一个 `.rdc` 抓帧，再让 AI 客户端调用工具。
 
 ## 提供的 MCP 工具
 
-`get_capture_status`、`get_draw_calls`、`get_draw_call_details`、`get_shader_info`、
-`get_buffer_contents`、`get_texture_info`、`get_texture_data`、`get_pipeline_state`。
+实测 `tools/list` 返回 **15 个**（上游 README 里只列了 8 个，已经过时）：
+
+| 工具 | 说明 |
+| --- | --- |
+| `get_capture_status` | 抓帧的加载状态 |
+| `list_captures` / `open_capture` | 列出 / 打开 `.rdc` 抓帧 |
+| `get_draw_calls` | 绘制调用列表（树状） |
+| `get_draw_call_details` | 单条绘制调用的详细信息 |
+| `get_frame_summary` | 整帧概览 |
+| `find_draws_by_shader` / `find_draws_by_texture` / `find_draws_by_resource` | 按着色器 / 纹理 / 资源反查绘制调用 |
+| `get_action_timings` | 各 action 的耗时统计 |
+| `get_shader_info` | 着色器源码与常量缓冲区的值 |
+| `get_buffer_contents` | 缓冲区内容（Base64） |
+| `get_texture_info` / `get_texture_data` | 纹理元数据 / 像素数据（Base64） |
+| `get_pipeline_state` | 管线状态 |
 
 ## 注意
 
