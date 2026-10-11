@@ -72,3 +72,10 @@ Contributing & Development
 
 I've added some notes on how to contribute, as well as where to get started looking through the code in [Developing-Change.md](docs/CONTRIBUTING/Developing-Change.md). All contribution information is available under [CONTRIBUTING.md](docs/CONTRIBUTING.md).
 
+AI tooling (MCP)
+--------------
+
+This repository vendors [RenderDocMCP](https://github.com/halby24/RenderDocMCP) under [`third_party/RenderDocMCP/`](third_party/RenderDocMCP/README.DHR.md), an MCP server that lets AI clients (such as Claude Code) read capture data out of a running RenderDoc / DHR instance. It is checked in as plain files rather than as a submodule.
+
+The client-side config lives in [`.mcp.json`](.mcp.json) at the repo root, but the server has to be installed first - see [third_party/RenderDocMCP/README.DHR.md](third_party/RenderDocMCP/README.DHR.md) for the setup steps. It is independent of the C++ build: nothing in `dhr.sln` depends on it.
+
