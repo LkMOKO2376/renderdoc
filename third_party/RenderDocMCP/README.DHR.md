@@ -22,7 +22,7 @@
 ```
 mcp_server/          MCP 服务端进程（Python + FastMCP 2.0），stdio 入口
 renderdoc_extension/ 装进 RenderDoc 的 UI 扩展，负责在 RenderDoc 进程内取数据
-scripts/install_extension.py  把扩展装到 %APPDATA%\qrenderdoc\extensions\ 的脚本
+scripts/install_extension.py  把扩展装到 %APPDATA%\qrenderdoc\extensions\ 的脚本（对 qdhr 不适用，见下）
 pyproject.toml       uv 工程定义，注册 `renderdoc-mcp` 命令
 ```
 
@@ -41,11 +41,32 @@ pyproject.toml       uv 工程定义，注册 `renderdoc-mcp` 命令
 
 1. **安装 RenderDoc 扩展**
 
+   扩展目录跟着**应用名**走（源码里是 `ConfigFilePath("extensions")`，即
+   `QStandardPaths::AppDataLocation`），所以本仓库构建的 qDHR 和官方装的 RenderDoc
+   用的不是一个目录：
+
+   | 目标 | 扩展目录 |
+   | --- | --- |
+   | 系统安装的 RenderDoc | `%APPDATA%\qrenderdoc\extensions\` |
+   | **本仓库构建的 qDHR** | `%APPDATA%\qdhr\extensions\` ← 从 `x64\Release\qdhr.exe` 启动时看这里 |
+
+   上游脚本写死了 `qrenderdoc`，**只对官方安装版有效**：
+
    ```bash
    python third_party/RenderDocMCP/scripts/install_extension.py
    ```
 
-2. **在 RenderDoc 里启用**：`Tools > Manage Extensions`，勾选 “RenderDoc MCP Bridge”。
+   要在本仓库的 qDHR 上用，手动拷到 `qdhr` 目录即可（把扩展内容更新后重复执行）：
+
+   ```bash
+   cp -r third_party/RenderDocMCP/renderdoc_extension \
+         "$APPDATA/qdhr/extensions/renderdoc_mcp_bridge"
+   ```
+
+   卸载就是删掉 `%APPDATA%\qdhr\extensions\renderdoc_mcp_bridge` 整个目录。
+
+2. **在 RenderDoc/qDHR 里启用**：`Tools > Manage Extensions`，勾选 “RenderDoc MCP Bridge”。
+   勾选后会写进该应用的 `UI.config` 的 `AlwaysLoad_Extensions`，之后启动自动加载。
 
 3. **（可选）全局安装 MCP 服务端**
 
