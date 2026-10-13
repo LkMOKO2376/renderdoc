@@ -10,6 +10,7 @@ from .services import (
     SearchService,
     ResourceService,
     PipelineService,
+    MeshService,
 )
 
 
@@ -23,6 +24,7 @@ class RenderDocFacade:
     - SearchService: Reverse lookup searches
     - ResourceService: Texture and buffer data
     - PipelineService: Pipeline state and shader info
+    - MeshService: Vertex-input / mesh layout
     """
 
     def __init__(self, ctx):
@@ -40,6 +42,7 @@ class RenderDocFacade:
         self._search = SearchService(ctx, self._invoke)
         self._resource = ResourceService(ctx, self._invoke)
         self._pipeline = PipelineService(ctx, self._invoke)
+        self._mesh = MeshService(ctx, self._invoke)
 
     def _invoke(self, callback):
         """Invoke callback on replay thread via BlockInvoke"""
@@ -118,6 +121,10 @@ class RenderDocFacade:
         """Get buffer data"""
         return self._resource.get_buffer_contents(resource_id, offset, length)
 
+    def list_buffers(self):
+        """List all buffers, sorted by length descending"""
+        return self._resource.list_buffers()
+
     def get_texture_info(self, resource_id):
         """Get texture metadata"""
         return self._resource.get_texture_info(resource_id)
@@ -135,3 +142,13 @@ class RenderDocFacade:
     def get_pipeline_state(self, event_id):
         """Get full pipeline state at an event"""
         return self._pipeline.get_pipeline_state(event_id)
+
+    # ==================== Mesh Operations ====================
+
+    def get_mesh_layout(self, event_id):
+        """Get the vertex-input layout of the draw at an event"""
+        return self._mesh.get_mesh_layout(event_id)
+
+    def get_mesh_data(self, event_id):
+        """Get the layout plus raw vertex/index bytes of the draw at an event"""
+        return self._mesh.get_mesh_data(event_id)

@@ -7,6 +7,7 @@ from typing import Literal
 
 from fastmcp import FastMCP
 
+from . import mesh_export
 from .bridge.client import RenderDocBridge, RenderDocBridgeError
 from .config import settings
 
@@ -219,6 +220,18 @@ def get_buffer_contents(
 
 
 @mcp.tool
+def list_buffers() -> dict:
+    """
+    List every buffer in the current capture, sorted by length descending.
+
+    Returns a list of {resource_id, name, length}. Useful for locating a
+    uniform/constant buffer by name or length before reading it with
+    get_buffer_contents.
+    """
+    return bridge.call("list_buffers")
+
+
+@mcp.tool
 def get_texture_info(resource_id: str) -> dict:
     """
     Get metadata about a texture resource.
@@ -278,6 +291,113 @@ def get_pipeline_state(event_id: int) -> dict:
     - Viewports and input assembly state
     """
     return bridge.call("get_pipeline_state", {"event_id": event_id})
+
+
+@mcp.tool
+def get_mesh_layout(event_id: int) -> dict:
+    """
+    Get the vertex-input (mesh) layout of the draw at a specific event.
+
+    Args:
+        event_id: The event ID of the draw call to inspect
+
+    Returns a description of the draw's vertex input including:
+    - input_assembly_topology: the primitive topology
+    - vertex_buffers: bound vertex buffers (slot, resource id, offset, stride, size)
+    - index_buffer: the index buffer binding and whether the draw is indexed
+    - attributes: vertex attributes (name, vertex buffer, offset, per-instance,
+      rate, used) with the format decomposed into readable fields
+    - num_indices / num_vertices: index count from the action and a derived
+      vertex count (may be null when it cannot be determined cheaply)
+    - suggested_columns: a flat list of per-component tokens (e.g. POSITION.x)
+      the user can pick from to choose what to export
+    """
+    return bridge.call("get_mesh_layout", {"event_id": event_id})
+
+
+@mcp.tool
+def get_mesh_data(event_id: int) -> dict:
+    """
+    Get the layout plus the raw vertex and index bytes of the draw at an event.
+
+    Args:
+        event_id: The event ID of the draw call to inspect
+
+    Returns:
+    - layout: the same structure as get_mesh_layout
+    - vertex_streams: one entry per distinct (resource_id, byte_offset,
+      byte_stride) among the layout's vertex_buffers, each with
+      {slot, resource_id, byte_offset, byte_stride, byte_length, data_base64}.
+      Streams with byte_stride 0 (generic attributes) are skipped. byte_length
+      is byte_stride * num_vertices, never the (possibly sentinel) byte_size.
+      Streams that could not be sized/read carry an "error" key instead.
+    - index_stream: {resource_id, byte_offset, byte_stride, byte_length,
+      data_base64} or None when the draw is not indexed. byte_offset includes
+      the draw's index_offset bias.
+
+    Raw bytes are returned so the caller decodes them; no decoding happens in
+    the extension.
+    """
+    return bridge.call("get_mesh_data", {"event_id": event_id})
+
+
+@mcp.tool
+def export_mesh(
+    event_id: int | list[int] | None = None,
+    columns: str | None = None,
+    name: str | None = None,
+    out_dir: str | None = None,
+    event_ids: list[int] | None = None,
+    dedup_draws: bool = True,
+) -> dict:
+    """
+    Decode one or more draw calls' meshes and write them out as CSV (and OBJ).
+
+    Args:
+        event_id: The event ID of the (single) draw call to export. A list of
+            event IDs is also accepted and means the same as ``event_ids``.
+        columns: Optional comma-separated column spec, e.g.
+            "pos=_input0.xyz,uv=_input1.xy,normal=normal(_input2)". Each token
+            is "name=<decoder>(<attribute>[.<components>])"; the decoder (raw,
+            oct_normal, normal) and the .xyzw swizzle are optional. Attribute
+            names come from the layout's attributes[].name. When omitted, every
+            attribute/component is exported as a raw column named
+            "<attribute>.<letter>". The "normal" decoder takes no swizzle and
+            accepts either a 32-bit packed octahedral normal or a >=3 component
+            32-bit float vector.
+        name: Output basename (default "mesh_<event_id>"; "mesh_<first>_<last>"
+            for a merged export).
+        out_dir: Output directory (default "<repo root>/Output").
+        event_ids: Multiple event IDs to decode and merge into one set of
+            files. A merged export REQUIRES an explicit ``columns`` spec: the
+            default column set is invented per event and cannot be
+            concatenated. Each event's indices are remapped by the running
+            vertex offset before concatenation.
+        dedup_draws: For a merged export, drop a later event whose index and
+            vertex-buffer bindings AND decoded vertex/index data match an
+            earlier kept event (default True); the drops are reported in
+            "duplicates".
+
+    Writes "<name>.vertices.csv" (idx + the spec's columns), "<name>.indices.csv"
+    (tri.a,tri.b,tri.c), and "<name>.obj" (v/vt/vn + f, 1-based) when the spec
+    names a position column (prefixes pos/position, uv/texcoord, normal/nrm).
+
+    A single event returns {vertices_csv, indices_csv, obj, vertex_count,
+    triangle_count, columns, bbox, base_vertex, warnings}. A merged export adds
+    {event_ids (kept, in order), duplicates ([{event_id, duplicate_of}]),
+    per_event ([{event_id, vertex_count, triangle_count, vertex_offset}])}.
+    Only Topology.TriangleList is supported; strips/fans raise. OBJ cannot carry
+    skinning -- weights/joints are CSV-only.
+    """
+    return mesh_export.export_mesh(
+        event_id=event_id,
+        columns=columns,
+        name=name,
+        out_dir=out_dir,
+        bridge=bridge,
+        event_ids=event_ids,
+        dedup_draws=dedup_draws,
+    )
 
 
 @mcp.tool

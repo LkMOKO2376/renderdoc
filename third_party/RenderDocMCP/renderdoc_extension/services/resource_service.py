@@ -26,6 +26,28 @@ class ResourceService:
                 return tex
         return None
 
+    def _find_buffer_by_id(self, controller, resource_id):
+        """Find a buffer description by resource ID.
+
+        Compares numerically, exactly like _find_texture_by_id. Do not build an
+        rd.ResourceId() and assign .id for comparison -- that construction path
+        does not round-trip in this build, which is why the old object
+        comparison missed every buffer.
+        """
+        target_id = Parsers.extract_numeric_id(resource_id)
+        for buf in controller.GetBuffers():
+            if Parsers.extract_numeric_id(str(buf.resourceId)) == target_id:
+                return buf
+        return None
+
+    def _get_resource_name(self, resource_id):
+        """Best-effort resource name lookup that never raises"""
+        try:
+            name = self.ctx.GetResourceName(resource_id)
+        except Exception:
+            return ""
+        return name or ""
+
     def get_buffer_contents(self, resource_id, offset=0, length=0):
         """Get buffer data"""
         if not self.ctx.IsCaptureLoaded():
@@ -34,41 +56,85 @@ class ResourceService:
         result = {"data": None, "error": None}
 
         def callback(controller):
-            # Parse resource ID
+            # Validate resource ID
             try:
-                rid = Parsers.parse_resource_id(resource_id)
+                Parsers.extract_numeric_id(str(resource_id))
             except Exception:
                 result["error"] = "Invalid resource ID: %s" % resource_id
                 return
 
-            # Find buffer
-            buf_desc = None
-            for buf in controller.GetBuffers():
-                if buf.resourceId == rid:
-                    buf_desc = buf
-                    break
+            # Find the buffer descriptor.
+            buf_desc = self._find_buffer_by_id(controller, resource_id)
 
             if not buf_desc:
                 result["error"] = "Buffer not found: %s" % resource_id
                 return
 
-            # Get data
+            # Read using the real descriptor's resourceId object -- do NOT pass
+            # a locally-parsed ResourceId, or the wrong resource is read.
             actual_length = length if length > 0 else buf_desc.length
-            data = controller.GetBufferData(rid, offset, actual_length)
+            try:
+                data = controller.GetBufferData(
+                    buf_desc.resourceId, offset, actual_length
+                )
+            except Exception as e:
+                result["error"] = "Failed to get buffer data: %s" % str(e)
+                return
 
-            result["data"] = {
-                "resource_id": resource_id,
+            info = {
+                "resource_id": str(buf_desc.resourceId),
                 "length": len(data),
                 "total_size": buf_desc.length,
                 "offset": offset,
                 "content_base64": base64.b64encode(data).decode("ascii"),
             }
 
+            name = self._get_resource_name(buf_desc.resourceId)
+            if name:
+                info["resource_name"] = name
+
+            result["data"] = info
+
         self._invoke(callback)
 
         if result["error"]:
             raise ValueError(result["error"])
         return result["data"]
+
+    def list_buffers(self):
+        """Enumerate all buffers, sorted by length descending.
+
+        Lets a caller locate a uniform/constant buffer by name or length before
+        reading its contents with get_buffer_contents.
+        """
+        if not self.ctx.IsCaptureLoaded():
+            raise ValueError("No capture loaded")
+
+        result = {"buffers": None, "error": None}
+
+        def callback(controller):
+            buffers = []
+            try:
+                for buf in controller.GetBuffers():
+                    buffers.append(
+                        {
+                            "resource_id": str(buf.resourceId),
+                            "name": self._get_resource_name(buf.resourceId),
+                            "length": buf.length,
+                        }
+                    )
+            except Exception as e:
+                result["error"] = "Failed to list buffers: %s" % str(e)
+                return
+
+            buffers.sort(key=lambda b: b["length"], reverse=True)
+            result["buffers"] = buffers
+
+        self._invoke(callback)
+
+        if result["error"]:
+            raise ValueError(result["error"])
+        return result["buffers"]
 
     def get_texture_info(self, resource_id):
         """Get texture metadata"""

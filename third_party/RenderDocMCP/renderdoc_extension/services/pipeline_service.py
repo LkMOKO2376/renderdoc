@@ -59,6 +59,24 @@ class PipelineService:
                 )
                 shader_info["resources"] = self._get_resource_bindings(reflection)
 
+                # Reflection input/output signatures. With OpNames stripped the
+                # attribute names are opaque (_input0, ...), so the regIndex
+                # (SPIR-V Location) plus varType/compCount/systemValue is what
+                # actually identifies each attribute.
+                try:
+                    shader_info["input_signature"] = self._serialize_signature(
+                        reflection.inputSignature
+                    )
+                except Exception as e:
+                    shader_info["input_signature_error"] = str(e)
+
+                try:
+                    shader_info["output_signature"] = self._serialize_signature(
+                        reflection.outputSignature
+                    )
+                except Exception as e:
+                    shader_info["output_signature_error"] = str(e)
+
             result["shader"] = shader_info
 
         self._invoke(callback)
@@ -66,6 +84,24 @@ class PipelineService:
         if result["error"]:
             raise ValueError(result["error"])
         return result["shader"]
+
+    def _serialize_signature(self, signature):
+        """Serialize a shader reflection input/output signature (SigParameter)"""
+        entries = []
+        for sig in signature:
+            entries.append(
+                {
+                    "var_name": sig.varName,
+                    "semantic_name": sig.semanticName,
+                    "semantic_index": sig.semanticIndex,
+                    "semantic_idx_name": sig.semanticIdxName,
+                    "reg_index": sig.regIndex,
+                    "system_value": str(sig.systemValue),
+                    "var_type": str(sig.varType),
+                    "comp_count": sig.compCount,
+                }
+            )
+        return entries
 
     def get_pipeline_state(self, event_id):
         """Get full pipeline state at an event"""
